@@ -19,8 +19,8 @@ env:
 
 jobs:
   # ------------------------------------------------------------------
-  # One matrix job per sub-service. Each runs: lint -> tests ->
-  # (on push) build & push image -> publish Helm chart.
+  # Matrix: lint + tests + (on push) build & push docker image, per
+  # sub-service in parallel.
   # ------------------------------------------------------------------
   test_and_build:
     runs-on: ubuntu-latest
@@ -35,7 +35,7 @@ jobs:
       run:
         working-directory: ./server/${{ matrix.service }}
     permissions:
-      contents: write
+      contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
@@ -68,17 +68,13 @@ jobs:
             echo "No tests/ directory — skipping pytest"
           fi
 
-      # ----------------- Build & publish (push only) -----------------
-      - name: Install Helm
-        if: github.event_name == 'push'
-        uses: azure/setup-helm@v3
-
+      # ----------------- Build & push image (push only) --------------
       - name: Set up Docker Buildx
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         uses: docker/setup-buildx-action@v3
 
       - name: Make versions
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         working-directory: .
         run: |
           chmod +x ./tools/version.sh
@@ -88,7 +84,7 @@ jobs:
           echo "DOCKER_TAGS=$(cat ./VERSION_DOCKER)" >> $GITHUB_ENV
 
       - name: Log into ${{ env.REGISTRY }}
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -96,17 +92,52 @@ jobs:
           password: ${{ github.token }}
 
       - name: Build and push docker image
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         uses: docker/build-push-action@v5
         with:
           push: true
           tags: ${{ env.DOCKER_IMAGES }}
           context: "${{ github.workspace }}/server/${{ matrix.service }}"
 
-      - name: Publish Helm chart
-        if: github.event_name == 'push'
+  # ------------------------------------------------------------------
+  # Publish all three Helm charts sequentially after the matrix
+  # finishes. Sequential to avoid the gh-pages branch racing on
+  # simultaneous pushes from matrix jobs.
+  # ------------------------------------------------------------------
+  publish_charts:
+    needs: [test_and_build]
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: helm-publish-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+
+      - name: Publish contract-generator chart
         uses: stefanprodan/helm-gh-pages@master
         with:
           token: ${{ github.token }}
-          charts_dir: "./server/${{ matrix.service }}/charts/"
-          target_dir: "./helm-charts/${{ matrix.service }}/"
+          charts_dir: "./server/contract-generator/charts/"
+          target_dir: "./helm-charts/contract-generator/"
+
+      - name: Publish contract-validator chart
+        uses: stefanprodan/helm-gh-pages@master
+        with:
+          token: ${{ github.token }}
+          charts_dir: "./server/contract-validator/charts/"
+          target_dir: "./helm-charts/contract-validator/"
+
+      - name: Publish clearing-house-stub chart
+        uses: stefanprodan/helm-gh-pages@master
+        with:
+          token: ${{ github.token }}
+          charts_dir: "./server/clearing-house-stub/charts/"
+          target_dir: "./helm-charts/clearing-house-stub/"
