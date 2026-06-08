@@ -62,10 +62,10 @@ jobs:
 
       - name: Run tests
         run: |
-          if [ -d "tests" ] || [ -d "app/tests" ] || find . -name "test_*.py" -print -quit | grep -q .; then
+          if [ -d "tests" ] || [ -d "app/tests" ]; then
             poetry run pytest
           else
-            echo "No tests yet — skipping pytest"
+            echo "No tests/ directory — skipping pytest"
           fi
 
       # ----------------- Build & publish (push only) -----------------

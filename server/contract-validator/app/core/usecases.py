@@ -75,6 +75,8 @@ class ValidateContractUsecase:
 
         jti = payload.get("jti")
         order_id = payload.get("order_id")
+        if not isinstance(jti, str):
+            return ValidationResult(allow=False, reason="token missing jti")
 
         # 4. Registration / revocation check against the local Clearing House.
         try:
