@@ -126,3 +126,4 @@ See each sub-service's `charts/server/values.yaml` for configuration options.
 ## Status
 
 v1 implementation. Policy Engine integration is documented as a v2 enhancement — see [`docs/contract-engine-payload-spec.md`](docs/contract-engine-payload-spec.md) §12.
+
