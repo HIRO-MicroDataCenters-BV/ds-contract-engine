@@ -1,0 +1,28 @@
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "ds-clearing-house-stub"
+version = "0.1.0"
+description = "Stub Clearing House — in-memory contract registry for testing the Contract Engine end-to-end"
+readme = "README.md"
+authors = ["HIRO-MicroDataCenters <all-hiro@hiro-microdatacenters.nl>"]
+license = "MIT"
+packages = [{ include = "*", from = "app" }]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+fastapi = "^0.109"
+uvicorn = "^0.26"
+classy-fastapi = "^0.6.1"
+prometheus-fastapi-instrumentator = "^6.1.0"
+pydantic = "^2.5"
+pydantic-settings = "^2.5.2"
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.0"
+mypy = "^1.8"
+
+[tool.black]
+line-length = 88

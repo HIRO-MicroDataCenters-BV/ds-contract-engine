@@ -1,0 +1,6 @@
+apiVersion: v2
+name: ds-contract-validator
+description: NextGen Data Space — Contract Validator (DS-307)
+type: application
+version: "0.1.0"
+appVersion: "0.1.0"

@@ -1,0 +1,112 @@
+name: Test and build servers
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - '**'
+    paths-ignore:
+      - 'releases/**'
+  pull_request:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAMESPACE: hiro-microdatacenters-bv
+
+jobs:
+  # ------------------------------------------------------------------
+  # One matrix job per sub-service. Each runs: lint -> tests ->
+  # (on push) build & push image -> publish Helm chart.
+  # ------------------------------------------------------------------
+  test_and_build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - contract-generator
+          - contract-validator
+          - clearing-house-stub
+    defaults:
+      run:
+        working-directory: ./server/${{ matrix.service }}
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        run: |
+          poetry config virtualenvs.in-project true
+          poetry install --no-root --with dev,test
+
+      - name: Run lint checks
+        run: |
+          poetry run black . --check --diff
+          poetry run mypy app
+
+      - name: Run tests
+        run: |
+          if [ -d "tests" ] || [ -d "app/tests" ] || find . -name "test_*.py" -print -quit | grep -q .; then
+            poetry run pytest
+          else
+            echo "No tests yet — skipping pytest"
+          fi
+
+      # ----------------- Build & publish (push only) -----------------
+      - name: Install Helm
+        if: github.event_name == 'push'
+        uses: azure/setup-helm@v3
+
+      - name: Set up Docker Buildx
+        if: github.event_name == 'push'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Make versions
+        if: github.event_name == 'push'
+        working-directory: .
+        run: |
+          chmod +x ./tools/version.sh
+          ./tools/version.sh "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/ds-${{ matrix.service }}" "${{ matrix.service }}"
+          echo "VERSION_APP=$(cat ./VERSION_APP)" >> $GITHUB_ENV
+          echo "DOCKER_IMAGES=$(cat ./DOCKER_IMAGES)" >> $GITHUB_ENV
+          echo "DOCKER_TAGS=$(cat ./VERSION_DOCKER)" >> $GITHUB_ENV
+
+      - name: Log into ${{ env.REGISTRY }}
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push docker image
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v5
+        with:
+          push: true
+          tags: ${{ env.DOCKER_IMAGES }}
+          context: "${{ github.workspace }}/server/${{ matrix.service }}"
+
+      - name: Publish Helm chart
+        if: github.event_name == 'push'
+        uses: stefanprodan/helm-gh-pages@master
+        with:
+          token: ${{ github.token }}
+          charts_dir: "./server/${{ matrix.service }}/charts/"
+          target_dir: "./helm-charts/${{ matrix.service }}/"

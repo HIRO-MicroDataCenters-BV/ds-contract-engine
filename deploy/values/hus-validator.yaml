@@ -1,0 +1,32 @@
+# Example values override for the Contract Validator on the HUS node.
+
+replicaCount: 1
+
+contractValidator:
+  # MUST match the node's identity. Validator rejects tokens whose aud != this.
+  nodeId: "hus.nextgen.hiro-develop.nl"
+  # In-cluster URL of the stub Clearing House (same namespace).
+  clearingHouseUrl: "http://ds-clearing-house-stub:8084"
+  # In-cluster URL of the local Generator's JWKS endpoint.
+  # When set, Validator hits {template}/.well-known/jwks.json regardless of iss.
+  # Leave empty ("") in cross-node scenarios so it derives from iss instead.
+  jwksBaseUrlTemplate: "http://ds-contract-generator:8082"
+  leewaySeconds: 5
+  jwksCacheTtlSeconds: 3600
+  httpTimeoutSeconds: 5.0
+  environment: "production"
+  logLevel: "INFO"
+
+ingress:
+  enabled: false
+
+serviceMonitor:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

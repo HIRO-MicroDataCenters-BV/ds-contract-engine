@@ -1,0 +1,74 @@
+replicaCount: 1
+
+image:
+  repository: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: ""
+nameOverride: ""
+fullnameOverride: "ds-clearing-house-stub"
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+podSecurityContext: {}
+securityContext: {}
+
+container:
+  command: ["uvicorn"]
+  args: ["app.main:app", "--host", "0.0.0.0", "--port", "8084"]
+
+service:
+  type: ClusterIP
+  port: 8084
+
+livenessProbe:
+  httpGet:
+    path: /health-check/
+    port: 8084
+
+readinessProbe:
+  httpGet:
+    path: /health-check/
+    port: 8084
+
+clearingHouseStub:
+  logLevel: "INFO"
+  environment: "development"
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+# --- ServiceMonitor (Prometheus operator) -------------------------------
+# Disabled by default — flip to true once the infra team confirms the
+# prometheus-operator is installed and ServiceMonitor CRD is available.
+serviceMonitor:
+  enabled: false
+  namespace: ""        # defaults to the release namespace
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}           # extra labels Prometheus uses to select monitors
+  metricRelabelings: []
+  relabelings: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []

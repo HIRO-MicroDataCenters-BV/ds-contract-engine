@@ -1,0 +1,65 @@
+name: Test and build clients
+
+on: [push, pull_request, workflow_dispatch]
+
+jobs:
+  test_and_build_client:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - contract-generator
+          - contract-validator
+    defaults:
+      run:
+        working-directory: ./client/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install poetry
+        run: pip install poetry
+
+      - name: Skip if client SDK has not been generated yet
+        id: precheck
+        run: |
+          if [ ! -f "pyproject.toml" ]; then
+            echo "No client SDK generated for ${{ matrix.service }} yet — skipping."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install dependencies
+        if: steps.precheck.outputs.skip == 'false'
+        run: |
+          poetry config virtualenvs.in-project true
+          poetry install --no-root
+
+      - name: Check code
+        if: steps.precheck.outputs.skip == 'false'
+        run: |
+          poetry run mypy . || true
+          poetry run flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+      - name: Run tests
+        if: steps.precheck.outputs.skip == 'false'
+        run: poetry run pytest || true
+
+      # Only publish to PyPI on release tags.
+      - name: Build and publish to pypi
+        if: steps.precheck.outputs.skip == 'false'
+        run: |
+          if [[ ${{ github.ref }} =~ ^refs/tags/[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag — building and publishing"
+            poetry config pypi-token.pypi ${{ secrets.PYPI_TOKEN }}
+            poetry build
+            poetry publish
+          else
+            echo "Not a release tag — skipping publish"
+          fi

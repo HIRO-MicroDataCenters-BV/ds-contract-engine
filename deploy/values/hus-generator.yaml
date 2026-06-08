@@ -1,0 +1,47 @@
+# Example values override for the Contract Generator on the HUS node.
+# Copy this file and rename per-node when deploying to others.
+
+replicaCount: 1
+
+contractGenerator:
+  # MUST match the node's external identity. Used as iss, aud, and the JWKS host.
+  nodeId: "hus.nextgen.hiro-develop.nl"
+  # The kid published in the JWT header and JWKS. Bump the suffix when keys rotate.
+  signingKeyId: "hus.nextgen.hiro-develop.nl#key-1"
+  # In-cluster URL of the stub Clearing House (same namespace).
+  clearingHouseUrl: "http://ds-clearing-house-stub:8084"
+  # Mounted from the Secret created by generate-signing-key.sh
+  signingKeyPath: "/keys/ed25519.pem"
+  defaultTtlSeconds: 3600
+  maxItemsPerContract: 50
+  environment: "production"
+  logLevel: "INFO"
+
+signingKeySecret:
+  enabled: true
+  name: "ds-contract-generator-signing-key"
+  mountPath: "/keys"
+
+# Enable ingress so the JWKS endpoint is reachable by other nodes' Validators.
+# Set className and host(s) per the cluster's ingress controller.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: hus.nextgen.hiro-develop.nl
+      paths:
+        - path: /.well-known/jwks.json
+          pathType: Exact
+  tls: []
+
+serviceMonitor:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

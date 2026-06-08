@@ -1,0 +1,20 @@
+# Example values override for the stub Clearing House on the HUS node.
+# Copy this file and rename per-node when deploying to others.
+
+replicaCount: 1
+
+clearingHouseStub:
+  environment: "production"   # disables any dev shortcuts in the stub
+  logLevel: "INFO"
+
+# Flip on once the platform Prometheus operator is confirmed.
+serviceMonitor:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi

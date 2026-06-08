@@ -1,0 +1,105 @@
+default_language_version:
+  python: python3.12
+
+default_stages: [commit, push]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v3.4.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: client/.*|.*\.md
+      - id: end-of-file-fixer
+        exclude: client/.*|.*\.md|snapshots
+      - id: check-yaml
+        exclude: charts/
+      - id: check-added-large-files
+
+  - repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.9.0
+    hooks:
+    -   id: shellcheck
+
+  # --- Per-service Python lint hooks ----------------------------------
+  # Each sub-service is its own Poetry project, so hooks are scoped via the
+  # `files:` filter and `poetry --project` flag.
+
+  # contract-generator
+  - repo: local
+    hooks:
+      - id: mypy-generator
+        name: mypy (contract-generator)
+        files: ^server/contract-generator/
+        entry: poetry --project server/contract-generator run mypy --config-file server/contract-generator/mypy.ini
+        language: system
+        types: [python]
+      - id: isort-generator
+        name: isort (contract-generator)
+        files: ^server/contract-generator/
+        entry: poetry --project server/contract-generator run isort
+        language: system
+        types: [python]
+      - id: black-generator
+        name: black (contract-generator)
+        files: ^server/contract-generator/
+        entry: poetry --project server/contract-generator run black
+        language: system
+        types: [python]
+
+  # contract-validator
+  - repo: local
+    hooks:
+      - id: mypy-validator
+        name: mypy (contract-validator)
+        files: ^server/contract-validator/
+        entry: poetry --project server/contract-validator run mypy --config-file server/contract-validator/mypy.ini
+        language: system
+        types: [python]
+      - id: isort-validator
+        name: isort (contract-validator)
+        files: ^server/contract-validator/
+        entry: poetry --project server/contract-validator run isort
+        language: system
+        types: [python]
+      - id: black-validator
+        name: black (contract-validator)
+        files: ^server/contract-validator/
+        entry: poetry --project server/contract-validator run black
+        language: system
+        types: [python]
+
+  # clearing-house-stub
+  - repo: local
+    hooks:
+      - id: mypy-stub
+        name: mypy (clearing-house-stub)
+        files: ^server/clearing-house-stub/
+        entry: poetry --project server/clearing-house-stub run mypy --config-file server/clearing-house-stub/mypy.ini
+        language: system
+        types: [python]
+      - id: black-stub
+        name: black (clearing-house-stub)
+        files: ^server/clearing-house-stub/
+        entry: poetry --project server/clearing-house-stub run black
+        language: system
+        types: [python]
+
+  # --- OpenAPI specs ---------------------------------------------------
+  # Regenerate the OpenAPI spec for each sub-service on commit so the
+  # api/<svc>/openapi.yaml file stays in sync with the FastAPI app.
+  - repo: local
+    hooks:
+      - id: openapi-generator
+        name: openapi spec (contract-generator)
+        entry: poetry --project server/contract-generator run python ./tools/extract_openapi.py app.main:app --app-dir ./server/contract-generator --out ./api/contract-generator/openapi.yaml --app_version_file ./VERSION
+        language: system
+        types: [python]
+        pass_filenames: false
+        always_run: true
+      - id: openapi-validator
+        name: openapi spec (contract-validator)
+        entry: poetry --project server/contract-validator run python ./tools/extract_openapi.py app.main:app --app-dir ./server/contract-validator --out ./api/contract-validator/openapi.yaml --app_version_file ./VERSION
+        language: system
+        types: [python]
+        pass_filenames: false
+        always_run: true

@@ -1,0 +1,152 @@
+openapi: 3.0.3
+info:
+  title: Data Space — Contract Generator
+  version: "0.1.0"
+  description: |
+    Mints VC-JWT contracts for the NextGen Data Space.
+    Sub-service of the Contract Engine (DS-306).
+
+    See `docs/payload-format.md` in the repo for the full token shape.
+  contact:
+    name: HIRO-MicroDataCenters
+    email: all-hiro@hiro-microdatacenters.nl
+  license:
+    name: MIT
+    url: https://github.com/HIRO-MicroDataCenters-BV/ds-contract-engine/blob/main/LICENSE
+
+servers:
+  - url: http://localhost:8082
+    description: Local development
+
+paths:
+  /health-check/:
+    get:
+      tags: [Health]
+      operationId: health_check
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthCheck"
+
+  /.well-known/jwks.json:
+    get:
+      tags: [JWKS]
+      operationId: get_jwks
+      summary: JWKS — public keys for this node
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JWKSet"
+
+  /v1/contracts:
+    post:
+      tags: [Contracts]
+      operationId: generate_contract
+      summary: Mint a new contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateContractRequest"
+      responses:
+        "200":
+          description: Token minted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateContractResponse"
+        "400":
+          description: Invalid request (e.g. too many items)
+        "500":
+          description: Signing or self-verification failed
+        "502":
+          description: Clearing House unavailable
+
+components:
+  schemas:
+    HealthCheck:
+      type: object
+      properties:
+        status:
+          type: string
+          example: OK
+
+    CatalogItem:
+      type: object
+      required: [id, identifier, title, hash]
+      properties:
+        id:
+          type: string
+          example: https://hus.nextgen.hiro-develop.nl/dataset-test-2907
+        identifier:
+          type: string
+          example: synthetic_dataset_test_2907
+        title:
+          type: string
+          example: GWAS on Cats 2907
+        hash:
+          type: string
+          pattern: "^sha256:[0-9a-f]{32,64}$"
+          example: sha256:3a7bd3e2360a3b5c1b2ef3b1a4e8f7a6
+
+    GenerateContractRequest:
+      type: object
+      required: [consumer_id, order_id, items]
+      properties:
+        consumer_id:
+          type: string
+          example: researcher-sai-kireeti
+        order_id:
+          type: string
+          format: uuid
+          example: 9d8e7c6b-5a4f-3e2d-1c0b-a9f8e7d6c5b4
+        ttl_seconds:
+          type: integer
+          minimum: 1
+          example: 3600
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/CatalogItem"
+
+    GenerateContractResponse:
+      type: object
+      required: [token, jti, exp]
+      properties:
+        token:
+          type: string
+          description: Compact JWS — the signed VC-JWT
+        jti:
+          type: string
+          format: uuid
+        exp:
+          type: integer
+          description: Unix expiry timestamp
+
+    JWK:
+      type: object
+      required: [kty, crv, kid, x]
+      properties:
+        kty: { type: string, example: OKP }
+        crv: { type: string, example: Ed25519 }
+        use: { type: string, example: sig }
+        alg: { type: string, example: EdDSA }
+        kid: { type: string }
+        x: { type: string }
+
+    JWKSet:
+      type: object
+      properties:
+        keys:
+          type: array
+          items:
+            $ref: "#/components/schemas/JWK"

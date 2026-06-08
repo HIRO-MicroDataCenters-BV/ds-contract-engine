@@ -1,0 +1,14 @@
+[project]
+name = "ds-contract-engine"
+version = "0.1.0"
+description = "NextGen Data Space — Contract Engine (Generator + Validator)"
+readme = "README.md"
+authors = [
+    { name = "HIRO-MicroDataCenters", email = "all-hiro@hiro-microdatacenters.nl" }
+]
+license = { text = "MIT" }
+requires-python = ">=3.12"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

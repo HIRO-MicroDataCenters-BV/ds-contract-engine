@@ -1,0 +1,102 @@
+replicaCount: 1
+
+image:
+  repository: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: ""
+nameOverride: ""
+fullnameOverride: "ds-contract-generator"
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+podSecurityContext: {}
+securityContext: {}
+
+container:
+  command: ["uvicorn"]
+  args: ["app.main:app", "--host", "0.0.0.0", "--port", "8082"]
+
+service:
+  type: ClusterIP
+  port: 8082
+
+livenessProbe:
+  httpGet:
+    path: /health-check/
+    port: 8082
+
+readinessProbe:
+  httpGet:
+    path: /health-check/
+    port: 8082
+
+# --- Application configuration -----------------------------------------
+# Maps to the DS__* env vars consumed by app/settings.py
+contractGenerator:
+  # The provider node identity; used as iss, aud, and JWKS host.
+  nodeId: "localhost"
+  # Where the Ed25519 private key is mounted inside the pod.
+  signingKeyPath: "/keys/ed25519.pem"
+  # The kid published in the JWT header and the JWKS endpoint.
+  signingKeyId: "localhost#key-1"
+  # Per-node Clearing House URL for jti registration.
+  clearingHouseUrl: "http://ds-clearing-house:8080"
+  # Default contract TTL when Checkout does not specify.
+  defaultTtlSeconds: 3600
+  # Maximum number of catalog items per contract.
+  maxItemsPerContract: 50
+  # development | staging | production
+  environment: "production"
+  logLevel: "INFO"
+
+# --- Signing key Secret mount ------------------------------------------
+# In production the Ed25519 private key is mounted from a Kubernetes Secret.
+# Set signingKeySecret.name to an existing Secret containing key `ed25519.pem`.
+signingKeySecret:
+  enabled: true
+  name: "ds-contract-generator-signing-key"
+  mountPath: "/keys"
+
+# --- Resource limits ---------------------------------------------------
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# --- ServiceMonitor (Prometheus operator) -------------------------------
+# Disabled by default — flip to true once the infra team confirms the
+# prometheus-operator is installed and the ServiceMonitor CRD is available.
+serviceMonitor:
+  enabled: false
+  namespace: ""        # defaults to the release namespace
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}           # extra labels Prometheus uses to select monitors
+  metricRelabelings: []
+  relabelings: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: ds-contract-generator.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []

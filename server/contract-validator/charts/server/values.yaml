@@ -1,0 +1,94 @@
+replicaCount: 1
+
+image:
+  repository: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: ""
+nameOverride: ""
+fullnameOverride: "ds-contract-validator"
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+podSecurityContext: {}
+securityContext: {}
+
+container:
+  command: ["uvicorn"]
+  args: ["app.main:app", "--host", "0.0.0.0", "--port", "8083"]
+
+service:
+  type: ClusterIP
+  port: 8083
+
+livenessProbe:
+  httpGet:
+    path: /health-check/
+    port: 8083
+
+readinessProbe:
+  httpGet:
+    path: /health-check/
+    port: 8083
+
+# --- Application configuration -----------------------------------------
+contractValidator:
+  # The provider node identity. Validator rejects tokens whose `aud` does
+  # not match this value.
+  nodeId: "localhost"
+  # Per-node Clearing House URL for jti status lookup.
+  clearingHouseUrl: "http://ds-clearing-house:8080"
+  # Optional JWKS base URL template. Empty means: derive from `iss` field
+  # of the token by hitting https://<iss>/.well-known/jwks.json
+  jwksBaseUrlTemplate: ""
+  # Clock skew tolerance (seconds) when checking iat / exp.
+  leewaySeconds: 5
+  # How long to cache JWKS responses (public keys change rarely).
+  jwksCacheTtlSeconds: 3600
+  # Timeout for upstream calls.
+  httpTimeoutSeconds: 5.0
+  # development | staging | production
+  environment: "production"
+  logLevel: "INFO"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# --- ServiceMonitor (Prometheus operator) -------------------------------
+# Disabled by default — flip to true once the infra team confirms the
+# prometheus-operator is installed and the ServiceMonitor CRD is available.
+serviceMonitor:
+  enabled: false
+  namespace: ""        # defaults to the release namespace
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}           # extra labels Prometheus uses to select monitors
+  metricRelabelings: []
+  relabelings: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: ds-contract-validator.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []

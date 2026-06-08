@@ -1,0 +1,6 @@
+apiVersion: v2
+name: ds-clearing-house-stub
+description: NextGen Data Space — Stub Clearing House for Contract Engine testing
+type: application
+version: "0.1.0"
+appVersion: "0.1.0"

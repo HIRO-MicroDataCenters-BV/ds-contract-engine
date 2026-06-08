@@ -1,0 +1,6 @@
+apiVersion: v2
+name: ds-contract-generator
+description: NextGen Data Space — Contract Generator (DS-306)
+type: application
+version: "0.1.0"
+appVersion: "0.1.0"

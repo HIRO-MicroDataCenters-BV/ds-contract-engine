@@ -1,0 +1,86 @@
+openapi: 3.0.3
+info:
+  title: Data Space — Contract Validator
+  version: "0.1.0"
+  description: |
+    Validates VC-JWT contracts before the Connector Service fetches node-local data.
+    Sub-service of the Contract Engine (DS-307).
+  contact:
+    name: HIRO-MicroDataCenters
+    email: all-hiro@hiro-microdatacenters.nl
+  license:
+    name: MIT
+    url: https://github.com/HIRO-MicroDataCenters-BV/ds-contract-engine/blob/main/LICENSE
+
+servers:
+  - url: http://localhost:8083
+    description: Local development
+
+paths:
+  /health-check/:
+    get:
+      tags: [Health]
+      operationId: health_check
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthCheck"
+
+  /v1/validate:
+    post:
+      tags: [Validation]
+      operationId: validate_contract
+      summary: Validate a contract token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ValidateRequest"
+      responses:
+        "200":
+          description: Validation result (allow or deny + reason)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidateResponse"
+        "500":
+          description: Unexpected validation failure
+
+components:
+  schemas:
+    HealthCheck:
+      type: object
+      properties:
+        status:
+          type: string
+          example: OK
+
+    ValidateRequest:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          description: The compact JWS to validate
+
+    ValidateResponse:
+      type: object
+      required: [allow]
+      properties:
+        allow:
+          type: boolean
+        reason:
+          type: string
+          nullable: true
+          description: Human-readable reason on deny; null on allow
+        jti:
+          type: string
+          nullable: true
+        order_id:
+          type: string
+          nullable: true
