@@ -44,9 +44,7 @@ class ValidateContractUsecase:
         kid = header.get("kid")
         iss = unverified.get("iss")
         if not kid or not iss:
-            return ValidationResult(
-                allow=False, reason="token missing kid or iss"
-            )
+            return ValidationResult(allow=False, reason="token missing kid or iss")
 
         # 2. Fetch the public key from the issuing node's JWKS.
         try:
@@ -98,6 +96,4 @@ class ValidateContractUsecase:
             )
 
         logger.info("contract.validated.allow jti=%s order_id=%s", jti, order_id)
-        return ValidationResult(
-            allow=True, reason=None, jti=jti, order_id=order_id
-        )
+        return ValidationResult(allow=True, reason=None, jti=jti, order_id=order_id)

@@ -54,7 +54,11 @@ class GenerateContractUsecase:
             )
 
         now = int(time.time())
-        ttl = request.ttl_seconds if request.ttl_seconds is not None else self._default_ttl
+        ttl = (
+            request.ttl_seconds
+            if request.ttl_seconds is not None
+            else self._default_ttl
+        )
         jti = str(uuid.uuid4())
         exp = now + ttl
 

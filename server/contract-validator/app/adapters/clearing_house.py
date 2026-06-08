@@ -28,9 +28,7 @@ class HttpClearingHouseReader:
         if resp.status_code == 404:
             return "not_registered"
         if resp.status_code >= 300:
-            raise ClearingHouseError(
-                f"Clearing House returned HTTP {resp.status_code}"
-            )
+            raise ClearingHouseError(f"Clearing House returned HTTP {resp.status_code}")
 
         try:
             body = resp.json()
