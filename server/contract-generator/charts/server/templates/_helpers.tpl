@@ -83,6 +83,10 @@ Maps directly to app/settings.py.
   value: "{{ .Values.contractGenerator.defaultTtlSeconds }}"
 - name: DS__MAX_ITEMS_PER_CONTRACT
   value: "{{ .Values.contractGenerator.maxItemsPerContract }}"
+{{- if .Values.catalogFields.useConfigMap }}
+- name: DS__CATALOG_FIELDS_CONFIG_PATH
+  value: "{{ .Values.catalogFields.mountPath }}/catalog_fields.yaml"
+{{- end }}
 - name: DS__ENVIRONMENT
   value: "{{ .Values.contractGenerator.environment }}"
 - name: DS__LOG_LEVEL

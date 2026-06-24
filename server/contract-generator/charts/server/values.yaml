@@ -65,6 +65,44 @@ signingKeySecret:
   name: "ds-contract-generator-signing-key"
   mountPath: "/keys"
 
+# --- Dynamic catalog-field schema --------------------------------------
+# The Generator embeds catalog item attributes into the token's
+# vc.credentialSubject.catalogItem[] entries. The schema is config-driven
+# so the consortium can change which attributes are included without a
+# code release.
+#
+# Two ways to provide the schema:
+#
+#   useConfigMap: false  (default)
+#     The Generator reads the YAML baked into the image at
+#     /code/app/core/catalog_fields.yaml. Use this when the in-repo
+#     schema is what you want.
+#
+#   useConfigMap: true
+#     The chart creates a ConfigMap from `fieldsYaml` below and mounts
+#     it at `mountPath`. The Generator reads from there instead. Use
+#     this when consortium agreement changes the schema and you don't
+#     want to rebuild the image.
+catalogFields:
+  useConfigMap: false
+  mountPath: "/etc/ds-contract-generator"
+  # Only used when useConfigMap is true. The contents must be valid
+  # YAML matching app/core/catalog_fields.yaml's schema.
+  fieldsYaml: |
+    fields:
+      - name: id
+        source: id
+        required: true
+      - name: identifier
+        source: identifier
+        required: true
+      - name: title
+        source: title
+        required: true
+      - name: hash
+        source: hash
+        required: true
+
 # --- Resource limits ---------------------------------------------------
 resources:
   requests:

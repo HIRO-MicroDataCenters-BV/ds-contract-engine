@@ -1,0 +1,14 @@
+{{- if .Values.catalogFields.useConfigMap -}}
+# Maps a custom catalog-field schema into the Generator pod. The Generator
+# loads this YAML at startup; restart pods after rolling the ConfigMap to
+# pick up changes.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "app.fullname" . }}-catalog-fields
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+data:
+  catalog_fields.yaml: |
+{{ .Values.catalogFields.fieldsYaml | indent 4 }}
+{{- end }}

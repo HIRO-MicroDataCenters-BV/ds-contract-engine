@@ -594,3 +594,7 @@ MigrationBackup/
 /server/charts/**/**.tgz
 
 /server/uploads/
+
+# Local-dev env files (never commit these)
+.env
+
