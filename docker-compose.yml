@@ -1,0 +1,86 @@
+# Local end-to-end stack for ds-contract-engine.
+#
+# Brings up all three services on a private Docker network so the Generator
+# can register tokens in the stub Clearing House and the Validator can fetch
+# the Generator's JWKS using in-cluster service names.
+#
+# Usage:
+#   docker compose up --build
+#
+# Then mint and validate from your host:
+#   ./examples/end-to-end.sh          # uses localhost:8082, localhost:8083
+
+services:
+  ds-clearing-house-stub:
+    build: ./server/clearing-house-stub
+    image: ds-clearing-house-stub:dev
+    container_name: ds-clearing-house-stub
+    environment:
+      DS__LOG_LEVEL: INFO
+      DS__ENVIRONMENT: development
+    ports:
+      - "8084:8084"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8084/health-check/').status == 200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  ds-contract-generator:
+    build: ./server/contract-generator
+    image: ds-contract-generator:dev
+    container_name: ds-contract-generator
+    depends_on:
+      ds-clearing-house-stub:
+        condition: service_healthy
+    environment:
+      # IMPORTANT: NODE_ID must match the host the Validator will use to
+      # reach the JWKS endpoint. In compose we use the container name.
+      DS__NODE_ID: ds-contract-generator
+      DS__SIGNING_KEY_PATH: /keys/ed25519.pem
+      DS__SIGNING_KEY_ID: ds-contract-generator#key-1
+      DS__CLEARING_HOUSE_URL: http://ds-clearing-house-stub:8084
+      DS__DEFAULT_TTL_SECONDS: 3600
+      DS__MAX_ITEMS_PER_CONTRACT: 50
+      DS__ENVIRONMENT: production
+      DS__LOG_LEVEL: INFO
+    ports:
+      - "8082:8082"
+    volumes:
+      # Generator auto-creates an Ed25519 key on first run. Persisting it
+      # in a named volume keeps the same key across container restarts.
+      - generator-keys:/keys
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8082/health-check/').status == 200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  ds-contract-validator:
+    build: ./server/contract-validator
+    image: ds-contract-validator:dev
+    container_name: ds-contract-validator
+    depends_on:
+      ds-contract-generator:
+        condition: service_healthy
+      ds-clearing-house-stub:
+        condition: service_healthy
+    environment:
+      # Validator's NODE_ID must match the Generator's NODE_ID so aud
+      # checks pass (the Generator stamps aud = its own NODE_ID).
+      DS__NODE_ID: ds-contract-generator
+      DS__CLEARING_HOUSE_URL: http://ds-clearing-house-stub:8084
+      # Force Validator to fetch JWKS from the Generator's compose service
+      # instead of trying to derive https://<iss>/.well-known/jwks.json
+      # which only works in production with real TLS hostnames.
+      DS__JWKS_BASE_URL_TEMPLATE: http://ds-contract-generator:8082
+      DS__LEEWAY_SECONDS: 5
+      DS__JWKS_CACHE_TTL_SECONDS: 3600
+      DS__HTTP_TIMEOUT_SECONDS: 5.0
+      DS__ENVIRONMENT: production
+      DS__LOG_LEVEL: INFO
+    ports:
+      - "8083:8083"
+
+volumes:
+  generator-keys:
