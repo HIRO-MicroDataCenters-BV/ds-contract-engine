@@ -121,6 +121,16 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@v3
 
+      # ---- Patch Chart.yaml + values.yaml per service ---------------
+      # version.sh derives a unique version string from the git state
+      # (e.g. 0.1.0-dev.7.develop.6adf397c on develop, 0.1.0 on tags)
+      # and rewrites Chart.yaml and values.yaml in-place before publish.
+      # Without this each push would just overwrite 0.1.0.tgz.
+      - name: Patch contract-generator chart version
+        run: |
+          chmod +x ./tools/version.sh
+          ./tools/version.sh "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/ds-contract-generator" "contract-generator"
+
       - name: Publish contract-generator chart
         uses: stefanprodan/helm-gh-pages@master
         with:
@@ -128,12 +138,18 @@ jobs:
           charts_dir: "./server/contract-generator/charts/"
           target_dir: "./helm-charts/contract-generator/"
 
+      - name: Patch contract-validator chart version
+        run: ./tools/version.sh "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/ds-contract-validator" "contract-validator"
+
       - name: Publish contract-validator chart
         uses: stefanprodan/helm-gh-pages@master
         with:
           token: ${{ github.token }}
           charts_dir: "./server/contract-validator/charts/"
           target_dir: "./helm-charts/contract-validator/"
+
+      - name: Patch clearing-house-stub chart version
+        run: ./tools/version.sh "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/ds-clearing-house-stub" "clearing-house-stub"
 
       - name: Publish clearing-house-stub chart
         uses: stefanprodan/helm-gh-pages@master
