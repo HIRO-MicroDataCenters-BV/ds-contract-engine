@@ -129,11 +129,28 @@ class GenerateContractUsecase:
             if host is None:
                 # Non-URI ids are allowed only if they start with the node id.
                 if not item.id.startswith(self._node_id):
+                    logger.warning(
+                        "contract.refused.cross_node "
+                        "consumer=%s order_id=%s item_id=%r reason=no_host",
+                        request.consumer_id,
+                        request.order_id,
+                        item.id,
+                    )
                     raise WrongNodeError(
                         f"item id {item.id!r} has no host and does not start "
                         f"with node id {self._node_id!r}"
                     )
             elif host != self._node_id:
+                logger.warning(
+                    "contract.refused.cross_node "
+                    "consumer=%s order_id=%s item_id=%r item_host=%s "
+                    "this_node=%s",
+                    request.consumer_id,
+                    request.order_id,
+                    item.id,
+                    host,
+                    self._node_id,
+                )
                 raise WrongNodeError(
                     f"item {item.id!r} host {host!r} does not match "
                     f"node {self._node_id!r}"

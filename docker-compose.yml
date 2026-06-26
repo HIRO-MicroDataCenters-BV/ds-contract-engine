@@ -34,11 +34,15 @@ services:
       ds-clearing-house-stub:
         condition: service_healthy
     environment:
-      # IMPORTANT: NODE_ID must match the host the Validator will use to
-      # reach the JWKS endpoint. In compose we use the container name.
-      DS__NODE_ID: ds-contract-generator
+      # NODE_ID is set to `localhost` for the local-dev experience: any
+      # request you make through Swagger UI / curl on the host machine
+      # naturally uses item URLs like http://localhost/<dataset> which
+      # then pass the Generator's node-ownership check. In production
+      # the Helm values override this with a real hostname (e.g.
+      # hus.nextgen.hiro-develop.nl).
+      DS__NODE_ID: localhost
       DS__SIGNING_KEY_PATH: /keys/ed25519.pem
-      DS__SIGNING_KEY_ID: ds-contract-generator#key-1
+      DS__SIGNING_KEY_ID: localhost#key-1
       DS__CLEARING_HOUSE_URL: http://ds-clearing-house-stub:8084
       DS__DEFAULT_TTL_SECONDS: 3600
       DS__MAX_ITEMS_PER_CONTRACT: 50
@@ -66,13 +70,14 @@ services:
       ds-clearing-house-stub:
         condition: service_healthy
     environment:
-      # Validator's NODE_ID must match the Generator's NODE_ID so aud
-      # checks pass (the Generator stamps aud = its own NODE_ID).
-      DS__NODE_ID: ds-contract-generator
+      # Must equal the Generator's NODE_ID so the audience check passes
+      # (Generator stamps aud = its own NODE_ID).
+      DS__NODE_ID: localhost
       DS__CLEARING_HOUSE_URL: http://ds-clearing-house-stub:8084
-      # Force Validator to fetch JWKS from the Generator's compose service
-      # instead of trying to derive https://<iss>/.well-known/jwks.json
-      # which only works in production with real TLS hostnames.
+      # JWKS still has to reach the Generator container, which lives at
+      # its Docker DNS name on the compose network — the URL diverges
+      # from NODE_ID here because there is no production-style TLS
+      # hostname resolving to the Generator pod in local dev.
       DS__JWKS_BASE_URL_TEMPLATE: http://ds-contract-generator:8082
       DS__LEEWAY_SECONDS: 5
       DS__JWKS_CACHE_TTL_SECONDS: 3600

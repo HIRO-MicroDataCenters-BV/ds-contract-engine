@@ -62,13 +62,35 @@ class ValidateContractUsecase:
                 leeway=self._leeway,
             )
         except jwt.ExpiredSignatureError:
+            logger.warning(
+                "contract.refused.expired iss=%s kid=%s this_node=%s",
+                iss,
+                kid,
+                self._node_id,
+            )
             return ValidationResult(allow=False, reason="token expired")
         except jwt.InvalidAudienceError:
+            # Token signed by some node, intended for another node, presented
+            # here. Either a misrouted token (benign bug upstream) or an
+            # attempt to use one node's token on another's data. Always log.
+            logger.warning(
+                "contract.refused.cross_node iss=%s kid=%s this_node=%s "
+                "reason=audience_mismatch",
+                iss,
+                kid,
+                self._node_id,
+            )
             return ValidationResult(
                 allow=False,
                 reason=f"token not for this node (aud != {self._node_id})",
             )
         except jwt.InvalidSignatureError:
+            logger.warning(
+                "contract.refused.bad_signature iss=%s kid=%s this_node=%s",
+                iss,
+                kid,
+                self._node_id,
+            )
             return ValidationResult(allow=False, reason="invalid signature")
         except jwt.InvalidTokenError as exc:
             return ValidationResult(allow=False, reason=f"invalid token: {exc}")
