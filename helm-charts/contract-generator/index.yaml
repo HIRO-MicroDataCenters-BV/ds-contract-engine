@@ -12,6 +12,16 @@ entries:
     - https://HIRO-MicroDataCenters-BV.github.io/ds-contract-engine/helm-charts/contract-generator/ds-contract-generator-0.1.0.tgz
     version: 0.1.0
   - apiVersion: v2
+    appVersion: 0.1.0-dev.9.main.37de861c
+    created: "2026-07-06T08:40:56.123328886Z"
+    description: NextGen Data Space — Contract Generator (DS-306)
+    digest: 971f1dde15d6eccbd8e521b760f510c41bd106580e7fd4f99125807b972a69ff
+    name: ds-contract-generator
+    type: application
+    urls:
+    - https://HIRO-MicroDataCenters-BV.github.io/ds-contract-engine/helm-charts/contract-generator/ds-contract-generator-0.1.0-dev.9.main.37de861c.tgz
+    version: 0.1.0-dev.9.main.37de861c
+  - apiVersion: v2
     appVersion: 0.1.0-dev.8.develop.b21b22f2
     created: "2026-06-26T10:05:48.801699305Z"
     description: NextGen Data Space — Contract Generator (DS-306)
@@ -31,4 +41,4 @@ entries:
     urls:
     - https://HIRO-MicroDataCenters-BV.github.io/ds-contract-engine/helm-charts/contract-generator/ds-contract-generator-0.1.0-dev.3.main.7dff0035.tgz
     version: 0.1.0-dev.3.main.7dff0035
-generated: "2026-06-26T10:05:48.800172918Z"
+generated: "2026-07-06T08:40:56.122761275Z"
