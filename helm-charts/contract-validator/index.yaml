@@ -12,6 +12,16 @@ entries:
     - https://HIRO-MicroDataCenters-BV.github.io/ds-contract-engine/helm-charts/contract-validator/ds-contract-validator-0.1.0.tgz
     version: 0.1.0
   - apiVersion: v2
+    appVersion: 0.1.0-dev.9.main.37de861c
+    created: "2026-07-06T08:40:58.795826364Z"
+    description: NextGen Data Space — Contract Validator (DS-307)
+    digest: 6042169250b24433aa9ff87f6b4db8cb21cca7e85db73ff414193a884e3a94ea
+    name: ds-contract-validator
+    type: application
+    urls:
+    - https://HIRO-MicroDataCenters-BV.github.io/ds-contract-engine/helm-charts/contract-validator/ds-contract-validator-0.1.0-dev.9.main.37de861c.tgz
+    version: 0.1.0-dev.9.main.37de861c
+  - apiVersion: v2
     appVersion: 0.1.0-dev.8.develop.b21b22f2
     created: "2026-06-26T10:05:51.274144369Z"
     description: NextGen Data Space — Contract Validator (DS-307)
@@ -21,4 +31,4 @@ entries:
     urls:
     - https://HIRO-MicroDataCenters-BV.github.io/ds-contract-engine/helm-charts/contract-validator/ds-contract-validator-0.1.0-dev.8.develop.b21b22f2.tgz
     version: 0.1.0-dev.8.develop.b21b22f2
-generated: "2026-06-26T10:05:51.272916251Z"
+generated: "2026-07-06T08:40:58.794902153Z"
