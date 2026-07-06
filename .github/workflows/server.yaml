@@ -100,9 +100,8 @@ jobs:
           context: "${{ github.workspace }}/server/${{ matrix.service }}"
 
   # ------------------------------------------------------------------
-  # Publish all three Helm charts sequentially after the matrix
-  # finishes. Sequential to avoid the gh-pages branch racing on
-  # simultaneous pushes from matrix jobs.
+  # Publish all three Helm charts sequentially + create GitHub release
+  # after the matrix finishes.
   # ------------------------------------------------------------------
   publish_charts:
     needs: [test_and_build]
@@ -121,15 +120,34 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@v3
 
-      # ---- Patch Chart.yaml + values.yaml per service ---------------
-      # version.sh derives a unique version string from the git state
-      # (e.g. 0.1.0-dev.7.develop.6adf397c on develop, 0.1.0 on tags)
-      # and rewrites Chart.yaml and values.yaml in-place before publish.
-      # Without this each push would just overwrite 0.1.0.tgz.
-      - name: Patch contract-generator chart version
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      # ------ Compute version once for the release step --------------
+      - name: Make version for release
         run: |
           chmod +x ./tools/version.sh
           ./tools/version.sh "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/ds-contract-generator" "contract-generator"
+          echo "VERSION_APP=$(cat ./VERSION_APP)" >> $GITHUB_ENV
+
+      # ------ Create GitHub Release ----------------------------------
+      - name: Create GitHub Release
+        run: |
+          if gh release view "${{ env.VERSION_APP }}" >/dev/null 2>&1; then
+            echo "Release ${{ env.VERSION_APP }} already exists — skipping."
+          else
+            gh release create "${{ env.VERSION_APP }}" \
+              --title "${{ env.VERSION_APP }}" \
+              --generate-notes
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # ------ Patch and publish each Helm chart ----------------------
+      - name: Patch contract-generator chart version
+        run: ./tools/version.sh "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/ds-contract-generator" "contract-generator"
 
       - name: Publish contract-generator chart
         uses: stefanprodan/helm-gh-pages@master
