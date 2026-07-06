@@ -8,9 +8,11 @@ from fastapi import Depends, HTTPException
 from app.core.entities import ContractGenerationRequest
 from app.core.exceptions import (
     ClearingHouseError,
+    MissingFieldError,
     SelfVerificationError,
     SigningError,
     TooManyItemsError,
+    WrongNodeError,
 )
 from app.core.usecases import GenerateContractUsecase
 from app.rest_api.depends import get_generate_contract_usecase
@@ -52,6 +54,12 @@ class ContractsRoutes(Routable):
             token, jti, exp = await usecase.execute(domain_request)
             return GenerateContractResponse(token=token, jti=jti, exp=exp)
         except TooManyItemsError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except WrongNodeError as exc:
+            logger.warning("Node-ownership check failed: %s", exc)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except MissingFieldError as exc:
+            logger.warning("Required catalog field missing: %s", exc)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except SigningError as exc:
             logger.exception("Signing failed")

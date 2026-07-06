@@ -1,19 +1,33 @@
 """Domain entities — VC-JWT v1 payload models.
 
 Locked v1 payload as documented in docs/payload-format.md.
+
+`CatalogItem` allows extra fields (`extra="allow"`) so the dynamic
+field schema in catalog_fields.yaml can pull in additional attributes
+beyond the v1 four. When the consortium agrees to include `license`,
+`format`, etc., Checkout starts sending them and Pydantic accepts
+them without a model change.
+
+`CredentialSubject.catalogItem` is a list of dicts (not strict
+CatalogItem instances) because the Generator projects each item
+through the field schema before embedding — the exact shape in the
+token is config-driven.
 """
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CatalogItem(BaseModel):
-    """A single catalog item granted by a contract.
+    """A single catalog item received from Checkout.
 
-    `id` is the DCAT-AP @id; `hash` binds the contract to a specific data
-    artefact via SHA-256 of the primary distribution.
+    The four named attributes are the locked v1 set. Additional fields
+    are accepted so the catalog-field schema (catalog_fields.yaml) can
+    surface them in the token without a code change.
     """
+
+    model_config = ConfigDict(extra="allow")
 
     id: str
     identifier: str
@@ -24,7 +38,7 @@ class CatalogItem(BaseModel):
 class CredentialSubject(BaseModel):
     """The body of the VC-JWT — kept lean. Identifiers come from outer JWT claims."""
 
-    catalogItem: List[CatalogItem]
+    catalogItem: List[dict[str, Any]]
 
 
 class VerifiableCredential(BaseModel):

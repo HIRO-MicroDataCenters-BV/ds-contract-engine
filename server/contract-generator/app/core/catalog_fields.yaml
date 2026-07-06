@@ -1,0 +1,59 @@
+# Catalog item field configuration for VC-JWT contracts.
+#
+# Defines which catalog item attributes the Generator embeds in the
+# vc.credentialSubject.catalogItem[] entries of a contract.
+#
+# Edit this file (or override via ConfigMap in the Helm chart) when the
+# consortium agrees a new field should be included or excluded. Restart
+# pods to apply.
+#
+# Notes
+# -----
+# - Fields appear in the token's catalogItem entries in the order listed
+#   below.
+# - If `required: true` and the field is missing from the incoming
+#   request, mint is refused (HTTP 400).
+# - If `required: false` and the field is missing, it is omitted from
+#   that catalog item entry — other items are unaffected.
+# - Tokens issued before a config change are unaffected.
+
+fields:
+  - name: id
+    source: id
+    required: true
+
+  - name: identifier
+    source: identifier
+    required: true
+
+  - name: title
+    source: title
+    required: true
+
+  - name: hash
+    source: hash
+    required: true
+
+# Candidates for the next consortium decision — uncomment to enable.
+# When you add one here, Checkout must also start sending that field in
+# its POST /v1/contracts request body.
+#
+# - name: license
+#   source: license
+#   required: false
+#
+# - name: format
+#   source: format
+#   required: false
+#
+# - name: byteSize
+#   source: byte_size
+#   required: false
+#
+# - name: accessURL
+#   source: access_url
+#   required: false
+#
+# - name: allowedRegions
+#   source: allowed_regions
+#   required: false

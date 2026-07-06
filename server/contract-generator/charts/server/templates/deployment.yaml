@@ -49,17 +49,31 @@ spec:
             {{- toYaml .Values.resources | nindent 12 }}
           env:
             {{- include "app.commonEnv" . | nindent 12 }}
-          {{- if .Values.signingKeySecret.enabled }}
+          {{- if or .Values.signingKeySecret.enabled .Values.catalogFields.useConfigMap }}
           volumeMounts:
+            {{- if .Values.signingKeySecret.enabled }}
             - name: signing-key
               mountPath: {{ .Values.signingKeySecret.mountPath }}
               readOnly: true
+            {{- end }}
+            {{- if .Values.catalogFields.useConfigMap }}
+            - name: catalog-fields
+              mountPath: {{ .Values.catalogFields.mountPath }}
+              readOnly: true
+            {{- end }}
           {{- end }}
-      {{- if .Values.signingKeySecret.enabled }}
+      {{- if or .Values.signingKeySecret.enabled .Values.catalogFields.useConfigMap }}
       volumes:
+        {{- if .Values.signingKeySecret.enabled }}
         - name: signing-key
           secret:
             secretName: {{ .Values.signingKeySecret.name }}
+        {{- end }}
+        {{- if .Values.catalogFields.useConfigMap }}
+        - name: catalog-fields
+          configMap:
+            name: {{ include "app.fullname" . }}-catalog-fields
+        {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

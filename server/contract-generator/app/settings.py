@@ -4,6 +4,7 @@ Mirrors the pattern used in ds-catalog (env_prefix="DS__", env_nested_delimiter=
 """
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -37,6 +38,14 @@ class Settings(BaseSettings):
     # --- Token defaults ---------------------------------------------------
     default_ttl_seconds: int = 3600
     max_items_per_contract: int = 50
+
+    # --- Catalog field schema --------------------------------------------
+    # YAML config that defines which catalog item attributes go into each
+    # vc.credentialSubject.catalogItem[] entry. Edit this file (or its
+    # ConfigMap in the cluster) and restart pods to apply a new schema.
+    catalog_fields_config_path: str = str(
+        Path(__file__).resolve().parent / "core" / "catalog_fields.yaml"
+    )
 
     # --- Server -----------------------------------------------------------
     port: int = 8082

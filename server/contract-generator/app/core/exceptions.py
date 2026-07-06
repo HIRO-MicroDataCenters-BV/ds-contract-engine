@@ -19,3 +19,11 @@ class ClearingHouseError(ContractGeneratorError):
 
 class SelfVerificationError(ContractGeneratorError):
     """The freshly minted token failed primary verification."""
+
+
+class WrongNodeError(ContractGeneratorError):
+    """A catalog item's host does not belong to this node."""
+
+
+class MissingFieldError(ContractGeneratorError):
+    """A field required by the catalog-field schema is missing from the request."""

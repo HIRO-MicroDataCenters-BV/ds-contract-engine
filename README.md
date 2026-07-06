@@ -51,6 +51,20 @@ ds-contract-engine/
 - **[`docs/payload-format.md`](docs/payload-format.md)** — locked v1 token format (Notion-import friendly).
 - **[`docs/contract-engine-payload-spec.md`](docs/contract-engine-payload-spec.md)** — full implementation reference: env vars, runtime flow, upstream service contracts.
 
+## Configuration overview — env vars in both local and cluster
+
+Every setting in every sub-service is delivered as an **environment variable** with the prefix `DS__`. The same variable names apply in local dev and in the cluster; only **how they're set** differs.
+
+| Environment | How env vars are set | When to use |
+|---|---|---|
+| **Local dev** | Copy `server/<svc>/.env.example` → `.env` and Pydantic Settings reads it automatically — OR prefix the shell command (`DS__NODE_ID=... poetry run uvicorn ...`). | Day-to-day development on your laptop. |
+| **Docker** | `-e DS__NODE_ID=...` flags on `docker run`. | Quick container test. |
+| **Cluster (Helm)** | Set values under `contractGenerator:` / `contractValidator:` in `values.yaml`. The chart's `_helpers.tpl` `app.commonEnv` macro renders them into the Deployment's `env:` section. | Production and any cluster deployment. |
+
+**Do not use a `.env` file in production** — it's a local-dev convenience only. The cluster pattern is Helm-managed.
+
+Every service has an `.env.example` showing every configurable variable. Copy it to `.env`, edit, the service picks it up at startup. The example is committed; `.env` is git-ignored.
+
 ## Quick start
 
 Both sub-services are FastAPI applications managed with Poetry.
@@ -59,30 +73,23 @@ Both sub-services are FastAPI applications managed with Poetry.
 
 ```bash
 cd server/contract-generator
+cp .env.example .env        # edit DS__NODE_ID etc. if you want
 poetry install
-DS__NODE_ID="hus.nextgen.hiro-develop.nl" \
-DS__SIGNING_KEY_PATH="./local-ed25519.pem" \
-DS__SIGNING_KEY_ID="hus.nextgen.hiro-develop.nl#key-1" \
-DS__CLEARING_HOUSE_URL="http://localhost:9001" \
-DS__ENVIRONMENT="development" \
 poetry run uvicorn app.main:app --reload --port 8082
 ```
 
-The Generator will create a fresh Ed25519 key on first run if `DS__SIGNING_KEY_PATH` does not exist (development convenience only — production deployments mount a Kubernetes Secret).
+The Generator creates a fresh Ed25519 key on first run if `DS__SIGNING_KEY_PATH` does not exist (development convenience only — production deployments mount a Kubernetes Secret).
 
 ### Run the Validator locally
 
 ```bash
 cd server/contract-validator
+cp .env.example .env
 poetry install
-DS__NODE_ID="hus.nextgen.hiro-develop.nl" \
-DS__CLEARING_HOUSE_URL="http://localhost:9001" \
-DS__JWKS_BASE_URL_TEMPLATE="http://localhost:8082" \
-DS__ENVIRONMENT="development" \
 poetry run uvicorn app.main:app --reload --port 8083
 ```
 
-The `DS__JWKS_BASE_URL_TEMPLATE` override points the Validator at the local Generator's JWKS endpoint instead of trying to derive `https://<iss>/.well-known/jwks.json` from the token's `iss` claim.
+The `.env.example` already sets `DS__JWKS_BASE_URL_TEMPLATE=http://localhost:8082` so the Validator hits the local Generator's JWKS endpoint instead of trying to derive `https://<iss>/.well-known/jwks.json` from the token's `iss` claim.
 
 ### End-to-end: mint then validate
 

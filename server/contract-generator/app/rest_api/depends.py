@@ -4,8 +4,20 @@ from functools import lru_cache
 
 from app.adapters.clearing_house import HttpClearingHouse, StubClearingHouse
 from app.adapters.signing_key_service import LocalEd25519SigningKey
+from app.core.catalog_fields import CatalogFieldSchema
 from app.core.usecases import GenerateContractUsecase
 from app.settings import Settings, get_settings
+
+
+@lru_cache(maxsize=1)
+def get_catalog_field_schema() -> CatalogFieldSchema:
+    """Load the catalog-field schema from the configured YAML path at startup.
+
+    Cached for the lifetime of the process — restart the pod to pick up a
+    new schema (e.g. after rolling a ConfigMap).
+    """
+    s = get_settings()
+    return CatalogFieldSchema.load(s.catalog_fields_config_path)
 
 
 @lru_cache(maxsize=1)
@@ -35,6 +47,7 @@ def get_generate_contract_usecase() -> GenerateContractUsecase:
         node_id=s.node_id,
         signing_key_service=get_signing_key_service(),
         clearing_house=get_clearing_house(),
+        catalog_field_schema=get_catalog_field_schema(),
         default_ttl_seconds=s.default_ttl_seconds,
         max_items_per_contract=s.max_items_per_contract,
     )
