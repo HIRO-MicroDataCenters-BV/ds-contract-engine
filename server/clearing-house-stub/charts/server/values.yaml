@@ -67,8 +67,15 @@ tolerations: []
 affinity: {}
 
 ingress:
+  # Default off — stub is internal only and should never be exposed externally.
+  # Keep disabled unless specifically required for debugging.
   enabled: false
-  className: ""
-  annotations: {}
-  hosts: []
-  tls: []
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  host: ds-clearing-house-stub.nextgen.hiro-develop.nl
+  path: /
+  pathType: Prefix
+  tls:
+    enabled: true
+    secretName: ds-clearing-house-stub-tls-secret
