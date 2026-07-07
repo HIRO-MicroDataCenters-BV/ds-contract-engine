@@ -12,6 +12,16 @@ entries:
     - https://HIRO-MicroDataCenters-BV.github.io/ds-contract-engine/helm-charts/clearing-house-stub/ds-clearing-house-stub-0.1.0.tgz
     version: 0.1.0
   - apiVersion: v2
+    appVersion: 0.1.0-dev.12.main.af108552
+    created: "2026-07-07T05:02:58.459403303Z"
+    description: NextGen Data Space — Stub Clearing House for Contract Engine testing
+    digest: 6182c78d81f4da3e11358a38f5548481dd9176871eb753d972ae1e741c948c9f
+    name: ds-clearing-house-stub
+    type: application
+    urls:
+    - https://HIRO-MicroDataCenters-BV.github.io/ds-contract-engine/helm-charts/clearing-house-stub/ds-clearing-house-stub-0.1.0-dev.12.main.af108552.tgz
+    version: 0.1.0-dev.12.main.af108552
+  - apiVersion: v2
     appVersion: 0.1.0-dev.10.develop.76a9529f
     created: "2026-07-07T04:59:54.790563929Z"
     description: NextGen Data Space — Stub Clearing House for Contract Engine testing
@@ -61,4 +71,4 @@ entries:
     urls:
     - https://HIRO-MicroDataCenters-BV.github.io/ds-contract-engine/helm-charts/clearing-house-stub/ds-clearing-house-stub-0.1.0-dev.3.main.7dff0035.tgz
     version: 0.1.0-dev.3.main.7dff0035
-generated: "2026-07-07T04:59:54.789701833Z"
+generated: "2026-07-07T05:02:58.458444175Z"
