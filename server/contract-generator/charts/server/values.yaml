@@ -129,12 +129,18 @@ tolerations: []
 affinity: {}
 
 ingress:
+  # Default off — opt-in per site via gitops values. Prevents an unintended
+  # Ingress on the default host when someone installs the chart raw.
   enabled: false
-  className: ""
-  annotations: {}
-  hosts:
-    - host: ds-contract-generator.local
-      paths:
-        - path: /
-          pathType: Prefix
-  tls: []
+  className: nginx
+  # cert-manager provisions a per-host cert when this annotation is present
+  # and tls.secretName is set. Same pattern used by ds-policy-engine, ds-catalog, etc.
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  host: ds-contract-generator.nextgen.hiro-develop.nl
+  path: /
+  pathType: Prefix
+  tls:
+    enabled: true
+    # cert-manager will create / refresh this Secret in the install namespace.
+    secretName: ds-contract-generator-tls-secret
