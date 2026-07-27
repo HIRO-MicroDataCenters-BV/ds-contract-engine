@@ -17,6 +17,7 @@ DS__SIGNING_KEY_ID="hus.nextgen.hiro-develop.nl#key-1" \
 DS__ENVIRONMENT="development" \
 poetry run uvicorn app.main:app --reload --port 8082
 
+# port number can be vary based on service
 # Terminal 2 — Validator
 cd server/contract-validator
 DS__NODE_ID="hus.nextgen.hiro-develop.nl" \
