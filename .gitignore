@@ -598,3 +598,5 @@ MigrationBackup/
 # Local-dev env files (never commit these)
 .env
 
+
+docs
