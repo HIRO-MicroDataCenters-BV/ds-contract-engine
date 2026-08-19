@@ -23,6 +23,7 @@ pydantic = "^2.5"
 pydantic-settings = "^2.5.2"
 sqlalchemy = { version = "^2.0", extras = ["asyncio"] }
 aiosqlite = "^0.20"
+alembic = "^1.13"
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.0"
