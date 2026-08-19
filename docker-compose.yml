@@ -26,6 +26,25 @@ services:
       timeout: 3s
       retries: 10
 
+  # The real Clearing House. Runs alongside the stub during the build-out:
+  # the stub keeps serving the Generator and Validator on 8084 until the
+  # drop-in milestone (step 4), at which point they are repointed here.
+  ds-clearing-house:
+    build: ./server/clearing-house
+    image: ds-clearing-house:dev
+    container_name: ds-clearing-house
+    environment:
+      DS__NODE_ID: localhost
+      DS__LOG_LEVEL: INFO
+      DS__ENVIRONMENT: development
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/health-check/').status == 200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   ds-contract-generator:
     build: ./server/contract-generator
     image: ds-contract-generator:dev
