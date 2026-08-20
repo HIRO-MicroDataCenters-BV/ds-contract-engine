@@ -70,6 +70,17 @@ class Repositories(ABC):
         ...
 
     @abstractmethod
+    async def append_event(self, event: AuditEvent) -> AuditEvent:
+        """Append one history entry on its own.
+
+        register() and set_status() already record the change they make, so
+        this is for events with no corresponding contract change — a refused
+        status transition being the case that needs it. Returns the event with
+        its assigned seq.
+        """
+        ...
+
+    @abstractmethod
     async def events_for_jti(self, jti: str) -> List[AuditEvent]:
         """History of one contract, oldest first."""
         ...

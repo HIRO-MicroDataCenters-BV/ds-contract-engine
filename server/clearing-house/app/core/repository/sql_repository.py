@@ -96,6 +96,16 @@ class SqlRepository(Repositories):
             logger.error("Database error setting status on %s: %s", jti, e)
             raise
 
+    async def append_event(self, event: AuditEvent) -> AuditEvent:
+        try:
+            async with self.database.session() as session:
+                session.add(event)
+                await session.commit()
+                return event
+        except SQLAlchemyError as e:
+            logger.error("Database error appending %s: %s", event.event_type, e)
+            raise
+
     # --- reads ----------------------------------------------------------
 
     async def get(self, jti: str) -> Optional[Contract]:
