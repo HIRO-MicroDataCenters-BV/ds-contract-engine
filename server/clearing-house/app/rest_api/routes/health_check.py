@@ -8,7 +8,7 @@ deep check belongs on a separate, unwired endpoint.
 
 from classy_fastapi import Routable, get
 
-from app.rest_api.serializers import HealthCheck
+from app.rest_api.api_models import HealthCheck
 from app.rest_api.tags import HEALTH
 
 
