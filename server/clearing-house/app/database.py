@@ -107,10 +107,13 @@ class Database:
 _database: Optional[Database] = None
 
 
-def init_database(url: str, echo: bool = False) -> Database | None:
+def init_database(url: str, echo: bool = False) -> Database:
     global _database
-    _database = Database(url, echo)
-    return _database
+    # Assigned to a local first: returning _database directly would widen the
+    # type back to Optional[Database], since that is how the global is declared.
+    database = Database(url, echo)
+    _database = database
+    return database
 
 
 def get_database() -> Database:
