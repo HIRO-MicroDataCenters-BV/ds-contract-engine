@@ -600,3 +600,13 @@ MigrationBackup/
 
 
 docs
+
+# SQLite databases — local development artefacts.
+# The -wal and -shm sidecars are created by WAL mode (see app/database.py);
+# they hold pending writes and shared-memory state and are as transient as
+# the database itself. Schema lives in migrations/, never in a committed file.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
