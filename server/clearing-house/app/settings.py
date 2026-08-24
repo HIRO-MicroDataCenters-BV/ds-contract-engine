@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     database: DatabaseSettings = DatabaseSettings()
 
     # --- Server -----------------------------------------------------------
-    port: int = 8080
+    port: int = 8085
     host: str = "0.0.0.0"
     log_level: str = "INFO"
     environment: str = "development"

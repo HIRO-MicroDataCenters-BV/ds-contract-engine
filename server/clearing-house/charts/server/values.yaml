@@ -28,11 +28,11 @@ securityContext: {}
 
 container:
   command: ["uvicorn"]
-  args: ["app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+  args: ["app.main:app", "--host", "0.0.0.0", "--port", "8085"]
 
 service:
   type: ClusterIP
-  port: 8080
+  port: 8085
 
 # Probes deliberately hit the shallow health check, which does not touch
 # storage. With one replica there is nowhere to fail over to: a database blip
@@ -41,12 +41,12 @@ service:
 livenessProbe:
   httpGet:
     path: /health-check/
-    port: 8080
+    port: 8085
 
 readinessProbe:
   httpGet:
     path: /health-check/
-    port: 8080
+    port: 8085
 
 # --- Application configuration -----------------------------------------
 clearingHouse:

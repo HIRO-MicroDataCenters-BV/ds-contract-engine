@@ -61,11 +61,11 @@ Because SQLite is single-writer, the Deployment runs `replicaCount: 1` with
 
 ```bash
 poetry install --no-root --with dev,test
-poetry run uvicorn app.main:app --port 8080
+poetry run uvicorn app.main:app --port 8085
 ```
 
 ```bash
-curl http://localhost:8080/health-check/     # {"status":"OK"}
+curl http://localhost:8085/health-check/     # {"status":"OK"}
 ```
 
 ## Tests

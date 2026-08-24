@@ -10,7 +10,11 @@ RUN pip install --no-cache-dir poetry \
     && rm -rf $(poetry config cache-dir)/{cache,artifacts}
 
 COPY ./app /code/app
+# Migrations ship with the image: the service refuses to create tables
+# itself, so the schema has to travel with the code that expects it.
+COPY ./migrations /code/migrations
+COPY ./alembic.ini /code/alembic.ini
 
-EXPOSE 8080
+EXPOSE 8085
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8085"]
