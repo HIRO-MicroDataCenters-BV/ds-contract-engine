@@ -610,3 +610,6 @@ docs
 *.db-shm
 *.sqlite
 *.sqlite3
+
+# Local compose data (SQLite ledger bind-mounted from ds-clearing-house)
+.data/

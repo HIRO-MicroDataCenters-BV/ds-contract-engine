@@ -37,9 +37,22 @@ services:
       DS__NODE_ID: localhost
       DS__LOG_LEVEL: INFO
       DS__ENVIRONMENT: development
+      # Four slashes. Three would be a RELATIVE path, putting the database
+      # back inside the container where `docker compose down` destroys it —
+      # silently, while the mounted directory sat empty. Same trap as the
+      # Helm chart, same fix.
+      DS__DATABASE__URL: sqlite+aiosqlite:////data/clearing_house.db
+    volumes:
+      # A bind mount, not a named volume, and deliberately so: on macOS a
+      # named volume lives inside the Docker VM where no local GUI can reach
+      # it. This puts the file on the host, so a SQLite browser can open it
+      # directly — and the ledger survives `docker compose down`.
+      # Mirrors the /data mount the Helm chart gives the pod.
+      - ./.data/clearing-house:/data
     # Apply migrations, then serve. The service deliberately does not create
     # tables at startup, so something has to — in Kubernetes this becomes an
-    # initContainer.
+    # initContainer. Alembic reads the same DS__DATABASE__URL, so both the
+    # migration and the app land on the mounted volume.
     command: >-
       sh -c "alembic upgrade head &&
              uvicorn app.main:app --host 0.0.0.0 --port 8085"
