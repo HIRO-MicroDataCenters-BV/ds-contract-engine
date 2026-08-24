@@ -48,12 +48,31 @@ readinessProbe:
     path: /health-check/
     port: 8085
 
+# --- Storage -------------------------------------------------------------
+persistence:
+  # Turning this off means the database lives in the container filesystem and
+  # is destroyed on every restart. Because validation is fail-closed, that
+  # denies every outstanding token at this node until it expires — so `false`
+  # is for throwaway environments only.
+  enabled: true
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+  storageClass: ""        # empty means the cluster default
+  mountPath: /data
+
 # --- Application configuration -----------------------------------------
 clearingHouse:
   # This node's identity. Stamped onto every ledger entry, and never taken
   # from a request body — a writer must not be able to attribute events to
   # another node.
   nodeId: "localhost"
+
+  # Four slashes, not three. sqlite+aiosqlite:///data/ch.db is a RELATIVE
+  # path — the database would land in the container's working directory and
+  # be lost on restart, silently, while the mounted volume sat empty.
+  databaseUrl: "sqlite+aiosqlite:////data/clearing_house.db"
+
   # development | staging | production
   environment: "production"
   logLevel: "INFO"

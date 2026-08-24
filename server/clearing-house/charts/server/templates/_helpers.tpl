@@ -48,6 +48,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "app.commonEnv" }}
 - name: DS__NODE_ID
   value: "{{ .Values.clearingHouse.nodeId }}"
+- name: DS__DATABASE__URL
+  value: "{{ .Values.clearingHouse.databaseUrl }}"
 - name: DS__ENVIRONMENT
   value: "{{ .Values.clearingHouse.environment }}"
 - name: DS__LOG_LEVEL
