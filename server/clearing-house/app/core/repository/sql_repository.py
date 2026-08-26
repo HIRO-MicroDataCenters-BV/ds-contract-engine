@@ -48,6 +48,8 @@ class SqlRepository(Repositories):
                         jti=contract.jti,
                         order_id=contract.order_id,
                         consumer_id=contract.consumer_id,
+                        # No from_status: nothing preceded registration.
+                        to_status=contract.status,
                         occurred_at=contract.registered_at,
                         detail=f"status={contract.status} exp={contract.exp}",
                     )
@@ -85,6 +87,8 @@ class SqlRepository(Repositories):
                         jti=jti,
                         order_id=contract.order_id,
                         consumer_id=contract.consumer_id,
+                        from_status=previous,
+                        to_status=status,
                         occurred_at=changed_at,
                         detail=f"{previous} -> {status}",
                     )

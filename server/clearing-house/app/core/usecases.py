@@ -127,6 +127,11 @@ class ContractUsecases:
                     jti=contract.jti,
                     order_id=contract.order_id,
                     consumer_id=contract.consumer_id,
+                    # The transition that was asked for and refused — recorded
+                    # exactly like one that succeeded, so a query for "attempts
+                    # to reach active" finds both.
+                    from_status=contract.status,
+                    to_status=requested,
                     occurred_at=self.clock(),
                     detail=f"{contract.status} -> {requested} (refused)",
                 )

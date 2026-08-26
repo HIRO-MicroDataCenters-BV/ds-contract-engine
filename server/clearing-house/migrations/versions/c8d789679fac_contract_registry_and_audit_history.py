@@ -34,6 +34,8 @@ def upgrade() -> None:
         sa.Column("jti", sa.String(length=64), nullable=True),
         sa.Column("order_id", sa.String(length=64), nullable=True),
         sa.Column("consumer_id", sa.String(length=255), nullable=True),
+        sa.Column("from_status", sa.String(length=16), nullable=True),
+        sa.Column("to_status", sa.String(length=16), nullable=True),
         sa.Column("occurred_at", sa.BigInteger(), nullable=False),
         sa.Column("detail", sa.String(length=1024), nullable=True),
         sa.PrimaryKeyConstraint("seq"),

@@ -32,6 +32,9 @@ class AuditEvent(Base):
     order_id: Mapped[Optional[str]] = mapped_column(String(64), index=True)
     consumer_id: Mapped[Optional[str]] = mapped_column(String(255))
 
+    from_status: Mapped[Optional[str]] = mapped_column(String(16))
+    to_status: Mapped[Optional[str]] = mapped_column(String(16))
+
     occurred_at: Mapped[int] = mapped_column(BigInteger)
 
     # Short human-readable note, e.g. "revoked by admin". Not machine-read.

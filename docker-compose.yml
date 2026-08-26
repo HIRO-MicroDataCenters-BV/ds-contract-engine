@@ -125,5 +125,28 @@ services:
     ports:
       - "8083:8083"
 
+  # Browser UI for the Clearing House ledger — http://localhost:8086
+  #
+  # Starts with the rest of the stack. It waits for ds-clearing-house to be
+  # healthy first, because the migration that creates the tables runs at that
+  # service's startup — attaching earlier would open a database with no schema.
+  sqlite-web:
+    image: coleifer/sqlite-web:latest
+    container_name: ds-sqlite-web
+    # -r is READ-ONLY and is the point of this service, not a default to relax.
+    # The Clearing House is writing this file live, and hand-editing an audit
+    # ledger from a web page is exactly what the service exists to prevent.
+    # -x keeps it from prompting for a password on startup.
+    command: sqlite_web -H 0.0.0.0 -p 8080 -x /data/clearing_house.db -r
+    volumes:
+      # The same bind mount ds-clearing-house writes to, so this reads the
+      # live ledger rather than a copy that goes stale.
+      - ./.data/clearing-house:/data
+    ports:
+      - "8086:8080"
+    depends_on:
+      ds-clearing-house:
+        condition: service_healthy
+
 volumes:
   generator-keys:
