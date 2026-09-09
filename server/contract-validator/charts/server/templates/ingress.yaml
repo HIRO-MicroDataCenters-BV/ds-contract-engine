@@ -3,30 +3,26 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ include "app.fullname" . }}-ingress
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
   labels:
     {{- include "app.labels" . | nindent 4 }}
   annotations:
-    {{- with .Values.ingress.annotations }}
-    {{- toYaml . | nindent 4 }}
-    {{- end }}
+    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
-  ingressClassName: {{ .Values.ingress.className | default "nginx" }}
+  ingressClassName: nginx
   rules:
-    - host: {{ .Values.ingress.host | quote }}
+    - host: ds-contract-validator.{{ .Values.namespace | default .Release.Namespace }}.{{ .Values.ingress.host }}
       http:
         paths:
-          - path: {{ .Values.ingress.path | default "/" }}
-            pathType: {{ .Values.ingress.pathType | default "Prefix" }}
+          - path: /
+            pathType: Prefix
             backend:
               service:
                 name: {{ include "app.fullname" . }}
                 port:
                   number: {{ .Values.service.port }}
-  {{- if .Values.ingress.tls.enabled }}
   tls:
     - hosts:
-        - {{ .Values.ingress.host | quote }}
-      secretName: {{ .Values.ingress.tls.secretName }}
-  {{- end }}
+        - ds-contract-validator.{{ .Values.namespace | default .Release.Namespace }}.{{ .Values.ingress.host }}
+      secretName: {{ include "app.fullname" . }}-tls-secret
 {{- end }}

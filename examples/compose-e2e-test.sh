@@ -15,8 +15,8 @@ set -uo pipefail
 
 GEN=${GEN:-http://localhost:8082}
 VAL=${VAL:-http://localhost:8083}
-CH=${CH:-http://localhost:8084}
-NODE_ID=${NODE_ID:-ds-contract-generator}
+CH=${CH:-http://localhost:8085}
+NODE_ID=${NODE_ID:-localhost}
 
 pass() { printf '✓ %s\n' "$1"; }
 fail() { printf '✗ %s\n   %s\n' "$1" "${2:-}" ; exit 1; }
@@ -71,7 +71,7 @@ if [ "$CODE" != "400" ]; then
 fi
 pass "cross-node mint refused (400)"
 
-echo "===== 4) Revoke contract via stub CH, then re-validate — expect deny ====="
+echo "===== 4) Revoke contract via CH, then re-validate — expect deny ====="
 PATCH_CODE=$(curl -sS -o /tmp/patch.json -w "%{http_code}" -X PATCH \
   "$CH/v1/contracts/${JTI}/status" \
   -H "Content-Type: application/json" \
