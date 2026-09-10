@@ -76,15 +76,18 @@ class ContractRecord(BaseModel):
 class ContractPage(BaseModel):
     """One page of contracts.
 
-    An object, never a bare array — see AuditEventPage for why that is
+    An object, never a bare array — see AuditEventList for why that is
     load-bearing for the Validator.
 
-    next_cursor is null on the last page. Pass it back as ?cursor= to get the
-    next one; treat it as opaque, because its contents will change.
+    Asking for a page past the end returns an empty `items`, not an error:
+    total and total_pages still say how far the list actually goes.
     """
 
     items: List[ContractRecord]
-    next_cursor: Optional[str] = None
+    page: int
+    limit: int
+    total: int
+    total_pages: int
 
 
 class AuditEventRecord(BaseModel):
@@ -98,8 +101,7 @@ class AuditEventRecord(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     # Position in the log. Two events can share occurred_at, so this is what
-    # gives a timeline an unambiguous order — and it is what a cursor will
-    # page on once the global feed exists.
+    # gives a timeline an unambiguous order, and what the feed sorts by.
     seq: int
 
     event_type: str
@@ -116,8 +118,8 @@ class AuditEventRecord(BaseModel):
     detail: Optional[str] = None
 
 
-class AuditEventPage(BaseModel):
-    """A set of history entries.
+class AuditEventList(BaseModel):
+    """Every history entry for one contract. Not paged.
 
     An object wrapping a list, never a bare array, and that is load-bearing
     rather than stylistic. The Validator's adapter calls `body.get("status")`
@@ -126,10 +128,19 @@ class AuditEventPage(BaseModel):
     fail-closed path as an HTTP 500. Every collection this service returns is
     therefore an object.
 
-    No cursor yet. A single contract's history is currently bounded — one
-    registration plus a handful of transitions. That stops being true if the
-    planned `data.accessed` events start landing per read, at which point this
-    grows a `next_cursor` the same shape as the global feed's.
+    Not paged because it is bounded — one registration plus a handful of
+    transitions. That changes if the planned `data.accessed` events start
+    landing per read, and when it does this becomes an AuditEventPage.
     """
 
     items: List[AuditEventRecord]
+
+
+class AuditEventPage(BaseModel):
+    """One page of the history log across every contract."""
+
+    items: List[AuditEventRecord]
+    page: int
+    limit: int
+    total: int
+    total_pages: int

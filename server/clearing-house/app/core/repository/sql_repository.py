@@ -9,7 +9,7 @@ from typing import List, Optional
 
 import logging
 
-from sqlalchemy import and_, or_, select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -17,8 +17,8 @@ from app.core.models import AuditEvent, Contract
 from app.core.repository.repositories import (
     EVENT_REGISTERED,
     EVENT_STATUS_CHANGED,
-    ContractPosition,
     ContractQuery,
+    EventQuery,
     Repositories,
 )
 from app.database import Database
@@ -147,56 +147,118 @@ class SqlRepository(Repositories):
             logger.error("Database error reading events for %s: %s", described, e)
             raise
 
-    async def list_contracts(
-        self,
-        query: ContractQuery,
-        limit: int,
-        after: Optional[ContractPosition] = None,
-    ) -> List[Contract]:
-        stmt = select(Contract)
+    # --- listing, for the admin console -----------------------------------
 
+    @staticmethod
+    def _contract_conditions(query: ContractQuery) -> List[ColumnElement[bool]]:
+        """The WHERE clause for a contract query, shared by list and count.
+
+        Built in one place so the two cannot disagree. A count that applied
+        one filter fewer than the list would make "showing 51–100 of N" wrong
+        in a way nobody would notice.
+        """
+        conditions: List[ColumnElement[bool]] = []
         if query.status is not None:
-            stmt = stmt.where(Contract.status == query.status)
+            conditions.append(Contract.status == query.status)
         if query.consumer_id is not None:
-            stmt = stmt.where(Contract.consumer_id == query.consumer_id)
+            conditions.append(Contract.consumer_id == query.consumer_id)
         if query.order_id is not None:
-            stmt = stmt.where(Contract.order_id == query.order_id)
+            conditions.append(Contract.order_id == query.order_id)
         if query.exp_at_or_before is not None:
-            stmt = stmt.where(Contract.exp <= query.exp_at_or_before)
+            conditions.append(Contract.exp <= query.exp_at_or_before)
         if query.exp_after is not None:
-            stmt = stmt.where(Contract.exp > query.exp_after)
+            conditions.append(Contract.exp > query.exp_after)
+        return conditions
 
-        if after is not None:
-            registered_at, jti = after
-            # "Strictly beyond `after`" in (registered_at DESC, jti DESC) order.
-            #
-            # Spelled out as OR/AND rather than a row-value comparison
-            # (registered_at, jti) < (x, y). Both engines support row values,
-            # but this form depends on no version of either, and it is the
-            # line most likely to hide an off-by-one — so it is written to be
-            # read, not to be short.
-            stmt = stmt.where(
-                or_(
-                    Contract.registered_at < registered_at,
-                    and_(
-                        Contract.registered_at == registered_at,
-                        Contract.jti < jti,
-                    ),
-                )
-            )
-
-        # jti as the tiebreaker is what makes the order total. Without it, two
-        # contracts registered in the same second have no defined order, and
-        # a page boundary falling between them could show one twice or never.
-        stmt = stmt.order_by(Contract.registered_at.desc(), Contract.jti.desc())
-        stmt = stmt.limit(limit)
-
+    async def list_contracts(
+        self, query: ContractQuery, limit: int, offset: int = 0
+    ) -> List[Contract]:
+        stmt = (
+            select(Contract)
+            .where(*self._contract_conditions(query))
+            # jti as the tiebreaker is what makes the order total. Without it,
+            # contracts registered in the same second have no defined order,
+            # and offset paging can then show one twice or never.
+            .order_by(Contract.registered_at.desc(), Contract.jti.desc())
+            .limit(limit)
+            .offset(offset)
+        )
         try:
             async with self.database.session() as session:
                 result = await session.execute(stmt)
                 return list(result.scalars().all())
         except SQLAlchemyError as e:
             logger.error("Database error listing contracts: %s", e)
+            raise
+
+    async def count_contracts(self, query: ContractQuery) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(Contract)
+            .where(*self._contract_conditions(query))
+        )
+        try:
+            async with self.database.session() as session:
+                return int((await session.execute(stmt)).scalar_one())
+        except SQLAlchemyError as e:
+            logger.error("Database error counting contracts: %s", e)
+            raise
+
+    @staticmethod
+    def _event_conditions(query: EventQuery) -> List[ColumnElement[bool]]:
+        """The WHERE clause for a history query, shared by list and count."""
+        conditions: List[ColumnElement[bool]] = []
+        if query.event_type is not None:
+            conditions.append(AuditEvent.event_type == query.event_type)
+        if query.jti is not None:
+            conditions.append(AuditEvent.jti == query.jti)
+        if query.order_id is not None:
+            conditions.append(AuditEvent.order_id == query.order_id)
+        if query.consumer_id is not None:
+            conditions.append(AuditEvent.consumer_id == query.consumer_id)
+        if query.from_status is not None:
+            conditions.append(AuditEvent.from_status == query.from_status)
+        if query.to_status is not None:
+            conditions.append(AuditEvent.to_status == query.to_status)
+        if query.occurred_at_or_after is not None:
+            conditions.append(AuditEvent.occurred_at >= query.occurred_at_or_after)
+        if query.occurred_before is not None:
+            conditions.append(AuditEvent.occurred_at < query.occurred_before)
+        return conditions
+
+    async def list_events(
+        self, query: EventQuery, limit: int, offset: int = 0
+    ) -> List[AuditEvent]:
+        stmt = (
+            select(AuditEvent)
+            .where(*self._event_conditions(query))
+            # Filtered on occurred_at but ordered by seq, deliberately. seq is
+            # the order the ledger recorded things in, and it is total;
+            # occurred_at can tie, and once other services report events with
+            # their own timestamps it can also arrive out of order.
+            .order_by(AuditEvent.seq.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        try:
+            async with self.database.session() as session:
+                result = await session.execute(stmt)
+                return list(result.scalars().all())
+        except SQLAlchemyError as e:
+            logger.error("Database error listing events: %s", e)
+            raise
+
+    async def count_events(self, query: EventQuery) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(AuditEvent)
+            .where(*self._event_conditions(query))
+        )
+        try:
+            async with self.database.session() as session:
+                return int((await session.execute(stmt)).scalar_one())
+        except SQLAlchemyError as e:
+            logger.error("Database error counting events: %s", e)
             raise
 
     async def health_check(self) -> bool:

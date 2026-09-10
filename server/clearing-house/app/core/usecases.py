@@ -17,7 +17,11 @@ import time
 
 from app.core.exceptions import IllegalStatusTransition
 from app.core.models import STATUS_ACTIVE, AuditEvent, Contract
-from app.core.repository import ContractPosition, ContractQuery, Repositories
+from app.core.repository import (
+    ContractQuery,
+    EventQuery,
+    Repositories,
+)
 from app.core.status import can_transition
 
 logger = logging.getLogger(__name__)
@@ -38,14 +42,22 @@ def _system_clock() -> int:
 
 
 class ContractListing(NamedTuple):
-    """One page of contracts, and where the next one starts.
-
-    next_position is None on the last page. It is a raw position, not a
-    cursor string: encoding it for a URL is the API's concern.
-    """
+    """One page of contracts, and how many match in total."""
 
     items: List[Contract]
-    next_position: Optional[ContractPosition]
+    total: int
+
+
+class EventListing(NamedTuple):
+    """One page of history entries, and how many match in total."""
+
+    items: List[AuditEvent]
+    total: int
+
+
+def _offset(page: int, limit: int) -> int:
+    """Rows to skip to reach `page`. Pages count from 1."""
+    return (page - 1) * limit
 
 
 class ContractUsecases:
@@ -129,14 +141,14 @@ class ContractUsecases:
     async def list_contracts(
         self,
         *,
+        page: int,
         limit: int,
         status: Optional[str] = None,
         consumer_id: Optional[str] = None,
         order_id: Optional[str] = None,
         expired: Optional[bool] = None,
-        after: Optional[ContractPosition] = None,
     ) -> ContractListing:
-        """Contracts, newest first, one page at a time.
+        """Contracts, newest first, one page at a time. Pages count from 1.
 
         `expired` is deliberately separate from `status`. A contract can be
         `active` and already past its exp — the Validator checks the two
@@ -160,16 +172,42 @@ class ContractUsecases:
             exp_after=now if expired is False else None,
         )
 
-        # One more than asked for: if it comes back, there is another page,
-        # and we know so without a separate COUNT that could disagree with the
-        # rows by the time it returned.
-        rows = await self.repository.list_contracts(query, limit + 1, after)
-        if len(rows) <= limit:
-            return ContractListing(rows, None)
+        # Two queries, so a contract registered between them can leave total
+        # one ahead of the rows. Harmless for a screen a person is reading —
+        # the same trade offset paging already makes when rows arrive between
+        # page loads — and not worth a transaction to close.
+        items = await self.repository.list_contracts(query, limit, _offset(page, limit))
+        total = await self.repository.count_contracts(query)
+        return ContractListing(items, total)
 
-        page = rows[:limit]
-        last = page[-1]
-        return ContractListing(page, (last.registered_at, last.jti))
+    async def list_events(
+        self,
+        *,
+        page: int,
+        limit: int,
+        event_type: Optional[str] = None,
+        jti: Optional[str] = None,
+        order_id: Optional[str] = None,
+        consumer_id: Optional[str] = None,
+        from_status: Optional[str] = None,
+        to_status: Optional[str] = None,
+        occurred_at_or_after: Optional[int] = None,
+        occurred_before: Optional[int] = None,
+    ) -> EventListing:
+        """The ledger across every contract, newest first. Pages count from 1."""
+        query = EventQuery(
+            event_type=event_type,
+            jti=jti,
+            order_id=order_id,
+            consumer_id=consumer_id,
+            from_status=from_status,
+            to_status=to_status,
+            occurred_at_or_after=occurred_at_or_after,
+            occurred_before=occurred_before,
+        )
+        items = await self.repository.list_events(query, limit, _offset(page, limit))
+        total = await self.repository.count_events(query)
+        return EventListing(items, total)
 
     async def order_history(self, order_id: str) -> List[AuditEvent]:
         """Everything that happened across a whole order.

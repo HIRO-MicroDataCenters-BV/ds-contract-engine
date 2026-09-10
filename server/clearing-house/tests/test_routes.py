@@ -15,7 +15,6 @@ fail-closed path rather than merely returning the wrong thing.
 Runs against a fake repository — no database, no migrations, no Docker.
 """
 
-import base64
 from typing import Dict, List, Optional
 
 import pytest
@@ -25,12 +24,13 @@ from app.core.models import STATUS_ACTIVE, AuditEvent, Contract
 from app.core.repository import (
     EVENT_REGISTERED,
     EVENT_STATUS_CHANGED,
-    ContractPosition,
     ContractQuery,
+    EventQuery,
     Repositories,
 )
 from app.core.usecases import ContractUsecases
 from app.main import app
+from app.rest_api.routes import ledger
 from app.rest_api.routes.contracts import get_usecase
 
 FROZEN_NOW = 1_700_000_000
@@ -108,12 +108,11 @@ class FakeRepository(Repositories):
     async def events_for_order(self, order_id: str) -> List[AuditEvent]:
         return [e for e in self.events if e.order_id == order_id]
 
-    async def list_contracts(
-        self,
-        query: ContractQuery,
-        limit: int,
-        after: Optional[ContractPosition] = None,
-    ) -> List[Contract]:
+    # Filtering is kept apart from ordering and slicing, exactly as
+    # SqlRepository builds one WHERE clause for both list and count — so the
+    # fake's totals cannot disagree with its rows either.
+
+    def _matching_contracts(self, query: ContractQuery) -> List[Contract]:
         rows = list(self.contracts.values())
         if query.status is not None:
             rows = [c for c in rows if c.status == query.status]
@@ -125,14 +124,47 @@ class FakeRepository(Repositories):
             rows = [c for c in rows if c.exp <= query.exp_at_or_before]
         if query.exp_after is not None:
             rows = [c for c in rows if c.exp > query.exp_after]
+        return rows
 
+    async def list_contracts(
+        self, query: ContractQuery, limit: int, offset: int = 0
+    ) -> List[Contract]:
+        rows = self._matching_contracts(query)
         # Same total order as SqlRepository: (registered_at, jti), descending.
-        # Python compares tuples lexicographically, which is exactly the SQL
-        # OR/AND expansion — so this is a faithful model, not an approximation.
         rows.sort(key=lambda c: (c.registered_at, c.jti), reverse=True)
-        if after is not None:
-            rows = [c for c in rows if (c.registered_at, c.jti) < after]
-        return rows[:limit]
+        return rows[offset : offset + limit]
+
+    async def count_contracts(self, query: ContractQuery) -> int:
+        return len(self._matching_contracts(query))
+
+    def _matching_events(self, query: EventQuery) -> List[AuditEvent]:
+        rows = list(self.events)
+        for field in (
+            "event_type",
+            "jti",
+            "order_id",
+            "consumer_id",
+            "from_status",
+            "to_status",
+        ):
+            wanted = getattr(query, field)
+            if wanted is not None:
+                rows = [e for e in rows if getattr(e, field) == wanted]
+        if query.occurred_at_or_after is not None:
+            rows = [e for e in rows if e.occurred_at >= query.occurred_at_or_after]
+        if query.occurred_before is not None:
+            rows = [e for e in rows if e.occurred_at < query.occurred_before]
+        return rows
+
+    async def list_events(
+        self, query: EventQuery, limit: int, offset: int = 0
+    ) -> List[AuditEvent]:
+        rows = self._matching_events(query)
+        rows.sort(key=lambda e: e.seq, reverse=True)
+        return rows[offset : offset + limit]
+
+    async def count_events(self, query: EventQuery) -> int:
+        return len(self._matching_events(query))
 
     async def health_check(self) -> bool:
         return True
@@ -145,9 +177,13 @@ def repository() -> FakeRepository:
 
 @pytest.fixture
 def client(repository: FakeRepository):
-    app.dependency_overrides[get_usecase] = lambda: ContractUsecases(
-        repository, clock=lambda: FROZEN_NOW
-    )
+    def usecases() -> ContractUsecases:
+        return ContractUsecases(repository, clock=lambda: FROZEN_NOW)
+
+    # Each route module defines its own get_usecase, so each must be
+    # overridden — miss one and its routes quietly reach for a real database.
+    app.dependency_overrides[get_usecase] = usecases
+    app.dependency_overrides[ledger.get_usecase] = usecases
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
@@ -384,6 +420,22 @@ def test_history_does_not_leak_another_contracts_events(client) -> None:
     assert {e["jti"] for e in items} == {"abc-111"}
 
 
+# --- paging, shared by both list endpoints -----------------------------
+
+
+def walk(client, path: str, **params) -> List[dict]:
+    """Fetch page 1, then every further page total_pages says exists."""
+    first = client.get(path, params=dict(params, page=1)).json()
+    pages = [first]
+    for n in range(2, first["total_pages"] + 1):
+        pages.append(client.get(path, params=dict(params, page=n)).json())
+    return pages
+
+
+def every_item(pages: List[dict]) -> List[dict]:
+    return [item for page in pages for item in page["items"]]
+
+
 # --- GET /v1/contracts ---------------------------------------------------
 
 
@@ -406,40 +458,36 @@ def jtis(response) -> List[str]:
     return [c["jti"] for c in response.json()["items"]]
 
 
-def walk(client, **params) -> List[List[str]]:
-    """Follow next_cursor to the end. Returns each page's jtis."""
-    pages, cursor = [], None
-    while True:
-        query = dict(params, **({"cursor": cursor} if cursor else {}))
-        body = client.get("/v1/contracts", params=query).json()
-        pages.append([c["jti"] for c in body["items"]])
-        cursor = body["next_cursor"]
-        if cursor is None:
-            return pages
+def contracts(client, **params):
+    return client.get("/v1/contracts", params=params)
 
 
 def test_list_returns_an_object_not_an_array(client) -> None:
-    """Same reason as history: the Validator calls body.get() on what a
-    contracts URL returns, and a list would make it raise."""
-    body = client.get("/v1/contracts").json()
-    assert isinstance(body, dict)
-    assert body == {"items": [], "next_cursor": None}
+    """The Validator calls body.get() on what a contracts URL returns, and a
+    list would make it raise."""
+    assert contracts(client).json() == {
+        "items": [],
+        "page": 1,
+        "limit": 50,
+        "total": 0,
+        "total_pages": 0,
+    }
 
 
 def test_list_is_newest_first(client, repository) -> None:
     seed(repository, "old", 100)
     seed(repository, "new", 300)
     seed(repository, "mid", 200)
-    assert jtis(client.get("/v1/contracts")) == ["new", "mid", "old"]
+    assert jtis(contracts(client)) == ["new", "mid", "old"]
 
 
 def test_list_breaks_ties_by_jti(client) -> None:
     """The Generator mints several contracts per second. Without a tiebreaker
-    those have no defined order, and a page boundary between them could show
-    one twice or never."""
+    those have no defined order, and offset paging could then show one twice
+    or never — even with nothing new arriving."""
     for jti in ("b", "c", "a"):
         client.post("/v1/contracts", json=register_body(jti))
-    assert jtis(client.get("/v1/contracts")) == ["c", "b", "a"]
+    assert jtis(contracts(client)) == ["c", "b", "a"]
 
 
 def test_paging_visits_every_contract_exactly_once(client, repository) -> None:
@@ -455,63 +503,70 @@ def test_paging_visits_every_contract_exactly_once(client, repository) -> None:
     ]:
         seed(repository, jti, at)
 
-    pages = walk(client, limit=3)
-    assert [len(p) for p in pages] == [3, 3, 1]
-    flat = [j for p in pages for j in p]
-    assert flat == ["g", "f", "e", "d", "c", "b", "a"]
+    pages = walk(client, "/v1/contracts", limit=3)
+    assert [len(p["items"]) for p in pages] == [3, 3, 1]
+    assert [c["jti"] for c in every_item(pages)] == ["g", "f", "e", "d", "c", "b", "a"]
 
 
-def test_the_last_page_has_no_cursor(client, repository) -> None:
-    seed(repository, "a", 100)
-    seed(repository, "b", 200)
-    assert (
-        client.get("/v1/contracts", params={"limit": 2}).json()["next_cursor"] is None
-    )
-    assert (
-        client.get("/v1/contracts", params={"limit": 1}).json()["next_cursor"]
-        is not None
-    )
-
-
-def test_new_arrivals_do_not_shift_the_next_page(client, repository) -> None:
-    """Why this is cursor-paged. With offset=3, both arrivals push every row
-    down, and page two would repeat the end of page one."""
-    for i in range(6):
+def test_a_page_reports_where_it_is(client, repository) -> None:
+    for i in range(7):
         seed(repository, f"c{i}", 100 + i)
+    body = contracts(client, page=2, limit=3).json()
+    assert {k: body[k] for k in ("page", "limit", "total", "total_pages")} == {
+        "page": 2,
+        "limit": 3,
+        "total": 7,
+        "total_pages": 3,
+    }
+    assert [c["jti"] for c in body["items"]] == ["c3", "c2", "c1"]
 
-    first = client.get("/v1/contracts", params={"limit": 3}).json()
-    assert jtis_of(first) == ["c5", "c4", "c3"]
 
-    seed(repository, "late-1", 900)
-    seed(repository, "late-2", 901)
+def test_a_page_past_the_end_is_empty_not_an_error(client, repository) -> None:
+    """The totals still say how far the list really goes."""
+    for i in range(7):
+        seed(repository, f"c{i}", 100 + i)
+    r = contracts(client, page=99, limit=3)
+    assert r.status_code == 200
+    assert r.json()["items"] == []
+    assert (r.json()["total"], r.json()["total_pages"]) == (7, 3)
 
-    second = client.get(
-        "/v1/contracts", params={"limit": 3, "cursor": first["next_cursor"]}
+
+def test_the_total_agrees_with_the_rows_the_filters_return(client, repository) -> None:
+    """Count and list are separate queries. If they ever applied different
+    filters, "showing 51-100 of N" would quietly lie."""
+    seed(repository, "a", 100, status="revoked", consumer_id="alice")
+    seed(repository, "b", 200, status="active", consumer_id="alice")
+    seed(repository, "c", 300, status="revoked", consumer_id="bob")
+    seed(repository, "d", 400, status="revoked", consumer_id="alice")
+    seed(
+        repository, "e", 500, status="revoked", consumer_id="alice", exp=FROZEN_NOW - 1
     )
-    assert jtis(second) == ["c2", "c1", "c0"]
 
-
-def jtis_of(body: dict) -> List[str]:
-    return [c["jti"] for c in body["items"]]
+    for params in (
+        {},
+        {"status": "revoked"},
+        {"consumer_id": "alice"},
+        {"status": "revoked", "consumer_id": "alice"},
+        {"status": "revoked", "consumer_id": "alice", "expired": "false"},
+    ):
+        pages = walk(client, "/v1/contracts", limit=2, **params)
+        assert pages[0]["total"] == len(every_item(pages)), params
 
 
 def test_list_filters_by_status(client, repository) -> None:
     seed(repository, "a", 100, status="active")
     seed(repository, "r", 200, status="revoked")
-    assert jtis(client.get("/v1/contracts", params={"status": "revoked"})) == ["r"]
+    body = contracts(client, status="revoked").json()
+    assert [c["jti"] for c in body["items"]] == ["r"]
+    assert body["total"] == 1
 
 
 def test_list_filters_by_consumer_and_order(client, repository) -> None:
     seed(repository, "x", 100, consumer_id="alice", order_id="o-1")
     seed(repository, "y", 200, consumer_id="alice", order_id="o-2")
     seed(repository, "z", 300, consumer_id="bob", order_id="o-1")
-    assert jtis(client.get("/v1/contracts", params={"consumer_id": "alice"})) == [
-        "y",
-        "x",
-    ]
-    assert jtis(
-        client.get("/v1/contracts", params={"consumer_id": "alice", "order_id": "o-1"})
-    ) == ["x"]
+    assert jtis(contracts(client, consumer_id="alice")) == ["y", "x"]
+    assert jtis(contracts(client, consumer_id="alice", order_id="o-1")) == ["x"]
 
 
 def test_expired_includes_the_boundary_second(client, repository) -> None:
@@ -520,11 +575,8 @@ def test_expired_includes_the_boundary_second(client, repository) -> None:
     seed(repository, "past", 100, exp=FROZEN_NOW - 1)
     seed(repository, "boundary", 200, exp=FROZEN_NOW)
     seed(repository, "future", 300, exp=FROZEN_NOW + 1)
-    assert jtis(client.get("/v1/contracts", params={"expired": "true"})) == [
-        "boundary",
-        "past",
-    ]
-    assert jtis(client.get("/v1/contracts", params={"expired": "false"})) == ["future"]
+    assert jtis(contracts(client, expired="true")) == ["boundary", "past"]
+    assert jtis(contracts(client, expired="false")) == ["future"]
 
 
 def test_expired_is_independent_of_status(client, repository) -> None:
@@ -532,36 +584,224 @@ def test_expired_is_independent_of_status(client, repository) -> None:
     but the permit is already dead."""
     seed(repository, "zombie", 100, status="active", exp=FROZEN_NOW - 60)
     seed(repository, "live", 200, status="active", exp=FROZEN_NOW + 60)
-    assert jtis(
-        client.get("/v1/contracts", params={"status": "active", "expired": "true"})
-    ) == ["zombie"]
+    assert jtis(contracts(client, status="active", expired="true")) == ["zombie"]
 
 
-def b64(raw: str) -> str:
-    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
-
-
-@pytest.mark.parametrize(
-    "cursor",
-    [
-        "!!!not-a-cursor!!!",
-        b64("not json"),
-        b64('{"r": 1, "j": "x"}'),  # an object, not a pair
-        b64("[1]"),  # wrong length
-        b64('[true, "x"]'),  # bool is an int in Python — must not pass
-        b64('["1", "x"]'),  # position as a string
-        b64('[1, ""]'),  # empty jti
-    ],
-)
-def test_a_damaged_cursor_is_400_not_500(client, cursor) -> None:
-    r = client.get("/v1/contracts", params={"cursor": cursor})
-    assert r.status_code == 400
+@pytest.mark.parametrize("page", [0, -1, "two"])
+def test_page_must_be_a_positive_number(client, page) -> None:
+    """Pages count from 1."""
+    assert contracts(client, page=page).status_code == 422
 
 
 @pytest.mark.parametrize("limit", [0, 201])
 def test_limit_is_bounded(client, limit) -> None:
-    assert client.get("/v1/contracts", params={"limit": limit}).status_code == 422
+    assert contracts(client, limit=limit).status_code == 422
 
 
 def test_list_rejects_an_unknown_status(client) -> None:
-    assert client.get("/v1/contracts", params={"status": "deleted"}).status_code == 422
+    assert contracts(client, status="deleted").status_code == 422
+
+
+# --- GET /v1/audit/events -----------------------------------------------
+
+
+def seed_event(
+    repository,
+    event_type: str = "contract.registered",
+    occurred_at: int = FROZEN_NOW,
+    **fields,
+) -> None:
+    """Append straight to the fake, so window tests can control occurred_at."""
+    repository._seq += 1
+    repository.events.append(
+        AuditEvent(
+            seq=repository._seq,
+            event_type=event_type,
+            occurred_at=occurred_at,
+            **fields,
+        )
+    )
+
+
+def event_seqs(response) -> List[int]:
+    return [e["seq"] for e in response.json()["items"]]
+
+
+def feed(client, **params):
+    return client.get("/v1/audit/events", params=params)
+
+
+def test_feed_returns_an_object_not_an_array(client) -> None:
+    assert feed(client).json() == {
+        "items": [],
+        "page": 1,
+        "limit": 50,
+        "total": 0,
+        "total_pages": 0,
+    }
+
+
+def test_feed_is_newest_first(client, repository) -> None:
+    for _ in range(3):
+        seed_event(repository)
+    assert event_seqs(feed(client)) == [3, 2, 1]
+
+
+def test_feed_spans_every_contract(client) -> None:
+    client.post("/v1/contracts", json=register_body("a"))
+    client.post("/v1/contracts", json=register_body("b"))
+    client.patch("/v1/contracts/b/status", json={"status": "revoked"})
+    body = feed(client).json()
+    assert body["total"] == 3
+    assert {e["jti"] for e in body["items"]} == {"a", "b"}
+
+
+def test_feed_paging_visits_every_event_exactly_once(client, repository) -> None:
+    for _ in range(7):
+        seed_event(repository)
+    pages = walk(client, "/v1/audit/events", limit=3)
+    assert [len(p["items"]) for p in pages] == [3, 3, 1]
+    assert [e["seq"] for e in every_item(pages)] == [7, 6, 5, 4, 3, 2, 1]
+
+
+def test_a_feed_page_past_the_end_is_empty_not_an_error(client, repository) -> None:
+    for _ in range(4):
+        seed_event(repository)
+    r = feed(client, page=10, limit=2)
+    assert r.status_code == 200
+    assert r.json()["items"] == []
+    assert (r.json()["total"], r.json()["total_pages"]) == (4, 2)
+
+
+def test_the_feed_total_agrees_with_the_rows_the_filters_return(
+    client, repository
+) -> None:
+    for i in range(9):
+        seed_event(
+            repository,
+            event_type=(
+                "contract.status_change_rejected" if i % 3 else "contract.registered"
+            ),
+            occurred_at=100 + i,
+            consumer_id="alice" if i % 2 else "bob",
+            to_status="active",
+        )
+    for params in (
+        {},
+        {"event_type": "contract.status_change_rejected"},
+        {"consumer_id": "alice"},
+        {"since": 102, "until": 107},
+        {
+            "event_type": "contract.status_change_rejected",
+            "consumer_id": "alice",
+            "since": 101,
+        },
+    ):
+        pages = walk(client, "/v1/audit/events", limit=2, **params)
+        assert pages[0]["total"] == len(every_item(pages)), params
+
+
+def test_everyone_who_tried_to_reactivate_a_finished_contract(client) -> None:
+    """The query an operator opens this endpoint for."""
+    for jti in ("a", "b", "c"):
+        client.post("/v1/contracts", json=register_body(jti))
+    client.patch("/v1/contracts/a/status", json={"status": "revoked"})
+    client.patch("/v1/contracts/b/status", json={"status": "completed"})
+    client.patch("/v1/contracts/c/status", json={"status": "cancelled"})
+    client.patch("/v1/contracts/a/status", json={"status": "active"})  # refused
+    client.patch("/v1/contracts/b/status", json={"status": "active"})  # refused
+
+    body = feed(
+        client, event_type="contract.status_change_rejected", to_status="active"
+    ).json()
+    assert body["total"] == 2
+    assert sorted((e["jti"], e["from_status"]) for e in body["items"]) == [
+        ("a", "revoked"),
+        ("b", "completed"),
+    ]
+
+
+def test_feed_filters(client, repository) -> None:
+    seed_event(
+        repository, jti="j1", order_id="o1", consumer_id="alice", to_status="active"
+    )
+    seed_event(
+        repository,
+        event_type="contract.status_changed",
+        jti="j1",
+        order_id="o1",
+        consumer_id="alice",
+        from_status="active",
+        to_status="revoked",
+    )
+    seed_event(
+        repository, jti="j2", order_id="o2", consumer_id="bob", to_status="active"
+    )
+
+    assert event_seqs(feed(client, event_type="contract.status_changed")) == [2]
+    assert event_seqs(feed(client, jti="j1")) == [2, 1]
+    assert event_seqs(feed(client, order_id="o2")) == [3]
+    assert event_seqs(feed(client, consumer_id="alice")) == [2, 1]
+    assert event_seqs(feed(client, from_status="active")) == [2]
+    assert event_seqs(feed(client, to_status="active")) == [3, 1]
+    assert event_seqs(feed(client, consumer_id="alice", to_status="revoked")) == [2]
+
+
+def test_an_unknown_event_type_matches_nothing(client, repository) -> None:
+    """Free text, not an enum, so new event kinds are not breaking changes."""
+    seed_event(repository)
+    r = feed(client, event_type="no.such.type")
+    assert r.status_code == 200
+    assert r.json()["items"] == []
+
+
+def test_the_window_is_half_open(client, repository) -> None:
+    seed_event(repository, occurred_at=99)
+    seed_event(repository, occurred_at=100)  # on `since`: in
+    seed_event(repository, occurred_at=150)
+    seed_event(repository, occurred_at=200)  # on `until`: out
+    assert event_seqs(feed(client, since=100, until=200)) == [3, 2]
+
+
+def test_consecutive_windows_count_a_boundary_event_once(client, repository) -> None:
+    seed_event(repository, occurred_at=100)
+    seed_event(repository, occurred_at=200)  # exactly on the join
+    seed_event(repository, occurred_at=300)
+    first = event_seqs(feed(client, since=100, until=200))
+    second = event_seqs(feed(client, since=200, until=300))
+    assert (first, second) == ([1], [2])
+
+
+def test_an_empty_window_is_empty_not_an_error(client, repository) -> None:
+    seed_event(repository, occurred_at=100)
+    r = feed(client, since=100, until=100)
+    assert r.status_code == 200
+    assert r.json()["items"] == []
+
+
+def test_an_inverted_window_is_rejected(client) -> None:
+    """Always a caller mistake; an empty page would hide it."""
+    r = feed(client, since=200, until=100)
+    assert r.status_code == 422
+    assert "after" in r.json()["detail"]
+
+
+@pytest.mark.parametrize("page", [0, -1, "two"])
+def test_feed_page_must_be_a_positive_number(client, page) -> None:
+    assert feed(client, page=page).status_code == 422
+
+
+@pytest.mark.parametrize("limit", [0, 201])
+def test_feed_limit_is_bounded(client, limit) -> None:
+    assert feed(client, limit=limit).status_code == 422
+
+
+def test_feed_rejects_an_unknown_status(client) -> None:
+    assert feed(client, to_status="deleted").status_code == 422
+
+
+def test_history_is_not_paged(client) -> None:
+    """One contract's history is bounded, so it returns everything in one
+    response — and must not carry paging fields it never fills in."""
+    client.post("/v1/contracts", json=register_body())
+    assert set(client.get("/v1/contracts/abc-111/history").json()) == {"items"}

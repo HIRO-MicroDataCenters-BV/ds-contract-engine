@@ -23,7 +23,7 @@ event. A contract that exists with no record of being created would be worse
 than no contract at all.
 """
 
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -34,15 +34,6 @@ from app.database import Database
 # Event types every implementation is expected to write.
 EVENT_REGISTERED = "contract.registered"
 EVENT_STATUS_CHANGED = "contract.status_changed"
-
-
-# A position in the contract list: (registered_at, jti) of the last row seen.
-#
-# Both halves are needed. Contracts are listed newest first, but registered_at
-# is whole seconds and the Generator can mint several in one — so it alone
-# cannot say where a page ended. jti breaks the tie. The pair is unique
-# because jti is.
-ContractPosition = Tuple[int, str]
 
 
 @dataclass(frozen=True)
@@ -59,6 +50,25 @@ class ContractQuery:
     order_id: Optional[str] = None
     exp_at_or_before: Optional[int] = None
     exp_after: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class EventQuery:
+    """Which history entries to list. Every field is optional; unset means "any".
+
+    The time window is half-open — occurred_at_or_after inclusive,
+    occurred_before exclusive — and the names say so, because the boundary is
+    the whole point: consecutive windows then never count an event twice.
+    """
+
+    event_type: Optional[str] = None
+    jti: Optional[str] = None
+    order_id: Optional[str] = None
+    consumer_id: Optional[str] = None
+    from_status: Optional[str] = None
+    to_status: Optional[str] = None
+    occurred_at_or_after: Optional[int] = None
+    occurred_before: Optional[int] = None
 
 
 class Repositories(ABC):
@@ -122,20 +132,44 @@ class Repositories(ABC):
 
     @abstractmethod
     async def list_contracts(
-        self,
-        query: ContractQuery,
-        limit: int,
-        after: Optional[ContractPosition] = None,
+        self, query: ContractQuery, limit: int, offset: int = 0
     ) -> List[Contract]:
-        """Contracts matching query, newest first, at most `limit` of them.
+        """Contracts matching query, newest first: skip `offset`, return up
+        to `limit`.
 
-        `after` continues from a previous call: only contracts strictly beyond
-        that position are returned. Positions are raw values — encoding them
-        into an opaque cursor is the API's business, not storage's.
-
-        Returns exactly what was asked for. Whether there is another page is
-        for the caller to find out, by asking for one more than it needs.
+        The order must be total — (registered_at, jti), both descending.
+        registered_at is whole seconds and the Generator mints several per
+        second, so on its own it leaves ties with no defined order, and with
+        offset paging an undefined order means a row can land on two pages or
+        on none, even when nothing new has arrived.
         """
+        ...
+
+    @abstractmethod
+    async def count_contracts(self, query: ContractQuery) -> int:
+        """How many contracts match query.
+
+        Must apply exactly the same conditions as list_contracts, or the
+        "showing 51–100 of N" that the UI builds from it will lie.
+        """
+        ...
+
+    @abstractmethod
+    async def list_events(
+        self, query: EventQuery, limit: int, offset: int = 0
+    ) -> List[AuditEvent]:
+        """History entries matching query, newest first by seq: skip
+        `offset`, return up to `limit`.
+
+        seq alone is a total order — unique, and only ever increasing — so
+        unlike contracts no tiebreaker is needed.
+        """
+        ...
+
+    @abstractmethod
+    async def count_events(self, query: EventQuery) -> int:
+        """How many history entries match query. Same conditions as
+        list_events, for the same reason as count_contracts."""
         ...
 
     @abstractmethod

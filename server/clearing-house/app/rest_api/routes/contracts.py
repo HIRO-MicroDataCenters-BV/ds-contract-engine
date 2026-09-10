@@ -20,14 +20,14 @@ from app.core.repository import Repositories
 from app.core.usecases import ContractUsecases
 from app.rest_api.depends import get_repository
 from app.rest_api.api_models import (
-    AuditEventPage,
+    AuditEventList,
     AuditEventRecord,
     ContractPage,
     ContractRecord,
     RegisterContractRequest,
     UpdateStatusRequest,
 )
-from app.rest_api.pagination import InvalidCursor, decode_cursor, encode_cursor
+from app.rest_api.pagination import page_count
 from app.rest_api.tags import CONTRACTS, LEDGER
 
 logger = logging.getLogger(__name__)
@@ -94,48 +94,34 @@ class ContractsRoutes(Routable):
                 "of status — a contract can be active and expired."
             ),
         ),
+        page: int = Query(1, ge=1, description="Pages count from 1."),
         limit: int = Query(50, ge=1, le=200),
-        cursor: Optional[str] = Query(
-            None, description="next_cursor from the previous page. Opaque."
-        ),
         usecases: ContractUsecases = Depends(get_usecase),
     ) -> ContractPage:
         """For the admin console. The Generator and Validator never call this.
 
-        Cursor-paged, not offset-paged. New contracts arrive while someone is
-        paging, and with offsets each arrival shifts every row down one — so
-        page two repeats the end of page one. A cursor names a row, not a
-        count, so arrivals cannot move it.
+        Paged by page number, so the console can show a total and jump to any
+        page. See pagination.py for the trade-off that comes with that.
 
-        `status` is exposed under that name but bound to `status_filter`,
-        because `status` is already the imported module of HTTP codes that
-        the error below depends on.
+        `status` is exposed under that name but bound to `status_filter`:
+        `status` is the imported module of HTTP codes this file depends on,
+        and shadowing it inside a handler is a trap for whoever next adds an
+        error response here.
         """
-        try:
-            after = decode_cursor(cursor) if cursor is not None else None
-        except InvalidCursor as e:
-            # 400, not 500: a damaged cursor is the caller's input, and letting
-            # it reach the query would surface as a type error.
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(e),
-            )
-
         listing = await usecases.list_contracts(
+            page=page,
             limit=limit,
             status=status_filter,
             consumer_id=consumer_id,
             order_id=order_id,
             expired=expired,
-            after=after,
         )
         return ContractPage(
             items=[ContractRecord.model_validate(c) for c in listing.items],
-            next_cursor=(
-                encode_cursor(listing.next_position)
-                if listing.next_position is not None
-                else None
-            ),
+            page=page,
+            limit=limit,
+            total=listing.total,
+            total_pages=page_count(listing.total, limit),
         )
 
     @get(
@@ -207,14 +193,14 @@ class ContractsRoutes(Routable):
         "/v1/contracts/{jti}/history",
         operation_id="get_contract_history",
         summary="The audit trail for one contract",
-        response_model=AuditEventPage,
+        response_model=AuditEventList,
         tags=[LEDGER],
     )
     async def get_contract_history(
         self,
         jti: str,
         usecases: ContractUsecases = Depends(get_usecase),
-    ) -> AuditEventPage:
+    ) -> AuditEventList:
         """Everything recorded against one contract, oldest first.
 
         Includes refused attempts, which is most of the point: an operator
@@ -231,7 +217,7 @@ class ContractsRoutes(Routable):
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"jti '{jti}' not registered",
             )
-        return AuditEventPage(
+        return AuditEventList(
             items=[AuditEventRecord.model_validate(e) for e in events]
         )
 

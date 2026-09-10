@@ -11,7 +11,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from app import __version__
 from app.database import init_database
-from app.rest_api.routes import contracts, health_check
+from app.rest_api.routes import contracts, health_check, ledger
 from app.settings import get_settings
 
 settings = get_settings()
@@ -88,6 +88,7 @@ Instrumentator().instrument(app).expose(app)
 
 app.include_router(health_check.routes.router)
 app.include_router(contracts.routes.router)
+app.include_router(ledger.routes.router)
 
 logger.info(
     "ds-clearing-house started node_id=%s environment=%s",
