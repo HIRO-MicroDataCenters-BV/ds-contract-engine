@@ -10,7 +10,7 @@ against the stub this service replaces — see clearing-house-stub. Changing
 them is not a local decision.
 """
 
-from typing import Literal
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -71,3 +71,51 @@ class ContractRecord(BaseModel):
     exp: int
     registered_at: int
     status_changed_at: int
+
+
+class AuditEventRecord(BaseModel):
+    """One entry from the history log.
+
+    Most fields are optional because not every event concerns a contract: a
+    future "peer.unreachable" has no permit, no order and no person, and
+    inventing values would be worse than leaving them null.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    # Position in the log. Two events can share occurred_at, so this is what
+    # gives a timeline an unambiguous order — and it is what a cursor will
+    # page on once the global feed exists.
+    seq: int
+
+    event_type: str
+    jti: Optional[str] = None
+    order_id: Optional[str] = None
+    consumer_id: Optional[str] = None
+
+    # The transition, structured. `detail` says the same thing in prose; these
+    # are what a query can filter on.
+    from_status: Optional[str] = None
+    to_status: Optional[str] = None
+
+    occurred_at: int
+    detail: Optional[str] = None
+
+
+class AuditEventPage(BaseModel):
+    """A set of history entries.
+
+    An object wrapping a list, never a bare array, and that is load-bearing
+    rather than stylistic. The Validator's adapter calls `body.get("status")`
+    on whatever a contracts URL returns: on an object that yields None and it
+    denies gracefully, on a list it raises AttributeError and escapes its
+    fail-closed path as an HTTP 500. Every collection this service returns is
+    therefore an object.
+
+    No cursor yet. A single contract's history is currently bounded — one
+    registration plus a handful of transitions. That stops being true if the
+    planned `data.accessed` events start landing per read, at which point this
+    grows a `next_cursor` the same shape as the global feed's.
+    """
+
+    items: List[AuditEventRecord]

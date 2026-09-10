@@ -1,9 +1,12 @@
-"""The three contract endpoints.
+"""The contract endpoints.
 
-Every status code here is fixed by the two callers, which are already written
-against the stub this service replaces. They are not local design decisions —
-see clearing-house-stub and the adapters in contract-generator and
-contract-validator.
+The first three are fixed by the two callers, which are already written
+against the stub this service replaces. Their status codes are not local
+design decisions — see clearing-house-stub and the adapters in
+contract-generator and contract-validator.
+
+The history endpoint is ours, added for the admin console. It is scoped to a
+single contract, so it lives here; the global ledger feed gets its own module.
 """
 
 import logging
@@ -16,11 +19,13 @@ from app.core.repository import Repositories
 from app.core.usecases import ContractUsecases
 from app.rest_api.depends import get_repository
 from app.rest_api.api_models import (
+    AuditEventPage,
+    AuditEventRecord,
     ContractRecord,
     RegisterContractRequest,
     UpdateStatusRequest,
 )
-from app.rest_api.tags import CONTRACTS
+from app.rest_api.tags import CONTRACTS, LEDGER
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +134,38 @@ class ContractsRoutes(Routable):
                 detail=f"jti '{jti}' not registered",
             )
         return ContractRecord.model_validate(contract)
+
+    @get(
+        "/v1/contracts/{jti}/history",
+        operation_id="get_contract_history",
+        summary="The audit trail for one contract",
+        response_model=AuditEventPage,
+        tags=[LEDGER],
+    )
+    async def get_contract_history(
+        self,
+        jti: str,
+        usecases: ContractUsecases = Depends(get_usecase),
+    ) -> AuditEventPage:
+        """Everything recorded against one contract, oldest first.
+
+        Includes refused attempts, which is most of the point: an operator
+        wants to see that someone tried three times to reactivate a revoked
+        contract, not merely that the contract is revoked.
+
+        404 rather than an empty list when the contract is unknown, matching
+        GET /v1/contracts/{jti}. Registration always writes an event, so an
+        empty history would mean a bug, never a legitimate answer.
+        """
+        events = await usecases.history(jti)
+        if events is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"jti '{jti}' not registered",
+            )
+        return AuditEventPage(
+            items=[AuditEventRecord.model_validate(e) for e in events]
+        )
 
 
 routes = ContractsRoutes()

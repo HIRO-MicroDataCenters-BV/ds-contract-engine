@@ -101,8 +101,18 @@ class ContractUsecases:
 
         return await self.repository.set_status(jti, new_status, self.clock())
 
-    async def history(self, jti: str) -> List[AuditEvent]:
-        """Everything that happened to one contract, oldest first."""
+    async def history(self, jti: str) -> Optional[List[AuditEvent]]:
+        """Everything that happened to one contract, oldest first.
+
+        None means no such contract, which is not the same as a contract with
+        no events — registration always writes one, so an empty list would be
+        a bug rather than a legitimate answer. Keeping the distinction here
+        rather than in the route lets it stay a 404, matching
+        GET /v1/contracts/{jti}, without the route knowing why.
+        """
+        contract = await self.repository.get(jti)
+        if contract is None:
+            return None
         return await self.repository.events_for_jti(jti)
 
     async def order_history(self, order_id: str) -> List[AuditEvent]:

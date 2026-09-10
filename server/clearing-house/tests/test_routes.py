@@ -21,7 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.models import STATUS_ACTIVE, AuditEvent, Contract
-from app.core.repository import Repositories
+from app.core.repository import EVENT_REGISTERED, EVENT_STATUS_CHANGED, Repositories
 from app.core.usecases import ContractUsecases
 from app.main import app
 from app.rest_api.routes.contracts import get_usecase
@@ -47,6 +47,20 @@ class FakeRepository(Repositories):
         if existing is not None:
             return existing
         self.contracts[contract.jti] = contract
+        # The real repository writes this in the same commit as the contract,
+        # so the fake must too — otherwise history tests pass here and fail
+        # against SQLite, which is the one thing a fake must never do.
+        await self.append_event(
+            AuditEvent(
+                event_type=EVENT_REGISTERED,
+                jti=contract.jti,
+                order_id=contract.order_id,
+                consumer_id=contract.consumer_id,
+                to_status=contract.status,
+                occurred_at=contract.registered_at,
+                detail=f"status={contract.status} exp={contract.exp}",
+            )
+        )
         return contract
 
     async def get(self, jti: str) -> Optional[Contract]:
@@ -58,8 +72,21 @@ class FakeRepository(Repositories):
         contract = self.contracts.get(jti)
         if contract is None:
             return None
+        previous = contract.status
         contract.status = status
         contract.status_changed_at = changed_at
+        await self.append_event(
+            AuditEvent(
+                event_type=EVENT_STATUS_CHANGED,
+                jti=jti,
+                order_id=contract.order_id,
+                consumer_id=contract.consumer_id,
+                from_status=previous,
+                to_status=status,
+                occurred_at=changed_at,
+                detail=f"{previous} -> {status}",
+            )
+        )
         return contract
 
     async def append_event(self, event: AuditEvent) -> AuditEvent:
@@ -245,3 +272,80 @@ def test_health_check(client) -> None:
     r = client.get("/health-check/")
     assert r.status_code == 200
     assert r.json() == {"status": "OK"}
+
+
+# --- GET /v1/contracts/{jti}/history ------------------------------------
+
+
+def test_history_returns_an_object_not_an_array(client) -> None:
+    """Load-bearing, not stylistic.
+
+    The Validator's adapter calls body.get("status") on whatever a contracts
+    URL returns. On an object that yields None and it denies gracefully; on a
+    list it raises AttributeError and escapes its fail-closed path as a 500.
+    """
+    client.post("/v1/contracts", json=register_body())
+    body = client.get("/v1/contracts/abc-111/history").json()
+    assert isinstance(body, dict)
+    assert isinstance(body["items"], list)
+
+
+def test_history_of_a_new_contract_has_the_registration(client) -> None:
+    client.post("/v1/contracts", json=register_body())
+    items = client.get("/v1/contracts/abc-111/history").json()["items"]
+    assert len(items) == 1
+    assert items[0]["event_type"] == "contract.registered"
+    assert items[0]["from_status"] is None
+    assert items[0]["to_status"] == "active"
+
+
+def test_history_records_a_status_change_with_both_ends(client) -> None:
+    client.post("/v1/contracts", json=register_body())
+    client.patch("/v1/contracts/abc-111/status", json={"status": "revoked"})
+    items = client.get("/v1/contracts/abc-111/history").json()["items"]
+    assert [e["event_type"] for e in items] == [
+        "contract.registered",
+        "contract.status_changed",
+    ]
+    assert (items[1]["from_status"], items[1]["to_status"]) == ("active", "revoked")
+
+
+def test_history_includes_refused_attempts(client) -> None:
+    """The reason an operator opens this endpoint at all."""
+    client.post("/v1/contracts", json=register_body())
+    client.patch("/v1/contracts/abc-111/status", json={"status": "revoked"})
+    client.patch("/v1/contracts/abc-111/status", json={"status": "active"})
+
+    items = client.get("/v1/contracts/abc-111/history").json()["items"]
+    refused = [e for e in items if e["event_type"] == "contract.status_change_rejected"]
+    assert len(refused) == 1
+    assert (refused[0]["from_status"], refused[0]["to_status"]) == ("revoked", "active")
+
+
+def test_history_is_oldest_first(client) -> None:
+    """Timeline order, and by seq — two events can share a timestamp."""
+    client.post("/v1/contracts", json=register_body())
+    client.patch("/v1/contracts/abc-111/status", json={"status": "completed"})
+    client.patch("/v1/contracts/abc-111/status", json={"status": "active"})
+
+    seqs = [
+        e["seq"] for e in client.get("/v1/contracts/abc-111/history").json()["items"]
+    ]
+    assert seqs == sorted(seqs)
+
+
+def test_history_of_an_unknown_contract_is_404(client) -> None:
+    """Not an empty list: registration always writes an event, so empty would
+    mean a bug. Matches GET /v1/contracts/{jti}."""
+    r = client.get("/v1/contracts/never-registered/history")
+    assert r.status_code == 404
+    assert "not registered" in r.json()["detail"]
+
+
+def test_history_does_not_leak_another_contracts_events(client) -> None:
+    client.post("/v1/contracts", json=register_body("abc-111"))
+    client.post("/v1/contracts", json=register_body("xyz-222"))
+    client.patch("/v1/contracts/xyz-222/status", json={"status": "revoked"})
+
+    items = client.get("/v1/contracts/abc-111/history").json()["items"]
+    assert {e["jti"] for e in items} == {"abc-111"}
