@@ -5,19 +5,19 @@ SQL) and owns the decisions neither should make:
 
 * whether a status change is permitted at all
 * what a newly registered contract looks like
-* what the current time is
+* what the current time is — and so what "expired" means
 
 No SQL, no HTTP. Raises plain exceptions; the route decides the status code.
 """
 
-from typing import Callable, List, Optional
+from typing import Callable, List, NamedTuple, Optional
 
 import logging
 import time
 
 from app.core.exceptions import IllegalStatusTransition
 from app.core.models import STATUS_ACTIVE, AuditEvent, Contract
-from app.core.repository import Repositories
+from app.core.repository import ContractPosition, ContractQuery, Repositories
 from app.core.status import can_transition
 
 logger = logging.getLogger(__name__)
@@ -35,6 +35,17 @@ Clock = Callable[[], int]
 
 def _system_clock() -> int:
     return int(time.time())
+
+
+class ContractListing(NamedTuple):
+    """One page of contracts, and where the next one starts.
+
+    next_position is None on the last page. It is a raw position, not a
+    cursor string: encoding it for a URL is the API's concern.
+    """
+
+    items: List[Contract]
+    next_position: Optional[ContractPosition]
 
 
 class ContractUsecases:
@@ -114,6 +125,51 @@ class ContractUsecases:
         if contract is None:
             return None
         return await self.repository.events_for_jti(jti)
+
+    async def list_contracts(
+        self,
+        *,
+        limit: int,
+        status: Optional[str] = None,
+        consumer_id: Optional[str] = None,
+        order_id: Optional[str] = None,
+        expired: Optional[bool] = None,
+        after: Optional[ContractPosition] = None,
+    ) -> ContractListing:
+        """Contracts, newest first, one page at a time.
+
+        `expired` is deliberately separate from `status`. A contract can be
+        `active` and already past its exp — the Validator checks the two
+        independently — so folding expiry into status would make "active"
+        quietly mean something the stored value does not.
+        """
+        now = self.clock()
+
+        # RFC 7519 §4.1.4: a token MUST NOT be accepted "on or after" its exp.
+        # So expired means exp <= now, and the boundary second is expired.
+        #
+        # The Validator adds a few seconds of leeway for clock skew, so for
+        # that brief window a contract listed here as expired may still
+        # validate. Leeway is a tolerance applied when checking, not a state,
+        # and this reports the state.
+        query = ContractQuery(
+            status=status,
+            consumer_id=consumer_id,
+            order_id=order_id,
+            exp_at_or_before=now if expired is True else None,
+            exp_after=now if expired is False else None,
+        )
+
+        # One more than asked for: if it comes back, there is another page,
+        # and we know so without a separate COUNT that could disagree with the
+        # rows by the time it returned.
+        rows = await self.repository.list_contracts(query, limit + 1, after)
+        if len(rows) <= limit:
+            return ContractListing(rows, None)
+
+        page = rows[:limit]
+        last = page[-1]
+        return ContractListing(page, (last.registered_at, last.jti))
 
     async def order_history(self, order_id: str) -> List[AuditEvent]:
         """Everything that happened across a whole order.

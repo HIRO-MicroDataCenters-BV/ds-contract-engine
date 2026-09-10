@@ -15,13 +15,20 @@ fail-closed path rather than merely returning the wrong thing.
 Runs against a fake repository — no database, no migrations, no Docker.
 """
 
+import base64
 from typing import Dict, List, Optional
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.core.models import STATUS_ACTIVE, AuditEvent, Contract
-from app.core.repository import EVENT_REGISTERED, EVENT_STATUS_CHANGED, Repositories
+from app.core.repository import (
+    EVENT_REGISTERED,
+    EVENT_STATUS_CHANGED,
+    ContractPosition,
+    ContractQuery,
+    Repositories,
+)
 from app.core.usecases import ContractUsecases
 from app.main import app
 from app.rest_api.routes.contracts import get_usecase
@@ -100,6 +107,32 @@ class FakeRepository(Repositories):
 
     async def events_for_order(self, order_id: str) -> List[AuditEvent]:
         return [e for e in self.events if e.order_id == order_id]
+
+    async def list_contracts(
+        self,
+        query: ContractQuery,
+        limit: int,
+        after: Optional[ContractPosition] = None,
+    ) -> List[Contract]:
+        rows = list(self.contracts.values())
+        if query.status is not None:
+            rows = [c for c in rows if c.status == query.status]
+        if query.consumer_id is not None:
+            rows = [c for c in rows if c.consumer_id == query.consumer_id]
+        if query.order_id is not None:
+            rows = [c for c in rows if c.order_id == query.order_id]
+        if query.exp_at_or_before is not None:
+            rows = [c for c in rows if c.exp <= query.exp_at_or_before]
+        if query.exp_after is not None:
+            rows = [c for c in rows if c.exp > query.exp_after]
+
+        # Same total order as SqlRepository: (registered_at, jti), descending.
+        # Python compares tuples lexicographically, which is exactly the SQL
+        # OR/AND expansion — so this is a faithful model, not an approximation.
+        rows.sort(key=lambda c: (c.registered_at, c.jti), reverse=True)
+        if after is not None:
+            rows = [c for c in rows if (c.registered_at, c.jti) < after]
+        return rows[:limit]
 
     async def health_check(self) -> bool:
         return True
@@ -349,3 +382,186 @@ def test_history_does_not_leak_another_contracts_events(client) -> None:
 
     items = client.get("/v1/contracts/abc-111/history").json()["items"]
     assert {e["jti"] for e in items} == {"abc-111"}
+
+
+# --- GET /v1/contracts ---------------------------------------------------
+
+
+def seed(repository, jti: str, registered_at: int, **fields) -> None:
+    """Put a contract straight into the fake, bypassing the frozen clock, so
+    ordering tests can control registered_at."""
+    repository.contracts[jti] = Contract(
+        jti=jti,
+        order_id=fields.get("order_id", "ord-1"),
+        consumer_id=fields.get("consumer_id", "dr-rahul"),
+        status=fields.get("status", "active"),
+        iat=1_699_999_000,
+        exp=fields.get("exp", 1_700_003_600),
+        registered_at=registered_at,
+        status_changed_at=registered_at,
+    )
+
+
+def jtis(response) -> List[str]:
+    return [c["jti"] for c in response.json()["items"]]
+
+
+def walk(client, **params) -> List[List[str]]:
+    """Follow next_cursor to the end. Returns each page's jtis."""
+    pages, cursor = [], None
+    while True:
+        query = dict(params, **({"cursor": cursor} if cursor else {}))
+        body = client.get("/v1/contracts", params=query).json()
+        pages.append([c["jti"] for c in body["items"]])
+        cursor = body["next_cursor"]
+        if cursor is None:
+            return pages
+
+
+def test_list_returns_an_object_not_an_array(client) -> None:
+    """Same reason as history: the Validator calls body.get() on what a
+    contracts URL returns, and a list would make it raise."""
+    body = client.get("/v1/contracts").json()
+    assert isinstance(body, dict)
+    assert body == {"items": [], "next_cursor": None}
+
+
+def test_list_is_newest_first(client, repository) -> None:
+    seed(repository, "old", 100)
+    seed(repository, "new", 300)
+    seed(repository, "mid", 200)
+    assert jtis(client.get("/v1/contracts")) == ["new", "mid", "old"]
+
+
+def test_list_breaks_ties_by_jti(client) -> None:
+    """The Generator mints several contracts per second. Without a tiebreaker
+    those have no defined order, and a page boundary between them could show
+    one twice or never."""
+    for jti in ("b", "c", "a"):
+        client.post("/v1/contracts", json=register_body(jti))
+    assert jtis(client.get("/v1/contracts")) == ["c", "b", "a"]
+
+
+def test_paging_visits_every_contract_exactly_once(client, repository) -> None:
+    """Including across ties — the case most likely to break."""
+    for jti, at in [
+        ("a", 100),
+        ("b", 100),
+        ("c", 100),
+        ("d", 200),
+        ("e", 200),
+        ("f", 300),
+        ("g", 300),
+    ]:
+        seed(repository, jti, at)
+
+    pages = walk(client, limit=3)
+    assert [len(p) for p in pages] == [3, 3, 1]
+    flat = [j for p in pages for j in p]
+    assert flat == ["g", "f", "e", "d", "c", "b", "a"]
+
+
+def test_the_last_page_has_no_cursor(client, repository) -> None:
+    seed(repository, "a", 100)
+    seed(repository, "b", 200)
+    assert (
+        client.get("/v1/contracts", params={"limit": 2}).json()["next_cursor"] is None
+    )
+    assert (
+        client.get("/v1/contracts", params={"limit": 1}).json()["next_cursor"]
+        is not None
+    )
+
+
+def test_new_arrivals_do_not_shift_the_next_page(client, repository) -> None:
+    """Why this is cursor-paged. With offset=3, both arrivals push every row
+    down, and page two would repeat the end of page one."""
+    for i in range(6):
+        seed(repository, f"c{i}", 100 + i)
+
+    first = client.get("/v1/contracts", params={"limit": 3}).json()
+    assert jtis_of(first) == ["c5", "c4", "c3"]
+
+    seed(repository, "late-1", 900)
+    seed(repository, "late-2", 901)
+
+    second = client.get(
+        "/v1/contracts", params={"limit": 3, "cursor": first["next_cursor"]}
+    )
+    assert jtis(second) == ["c2", "c1", "c0"]
+
+
+def jtis_of(body: dict) -> List[str]:
+    return [c["jti"] for c in body["items"]]
+
+
+def test_list_filters_by_status(client, repository) -> None:
+    seed(repository, "a", 100, status="active")
+    seed(repository, "r", 200, status="revoked")
+    assert jtis(client.get("/v1/contracts", params={"status": "revoked"})) == ["r"]
+
+
+def test_list_filters_by_consumer_and_order(client, repository) -> None:
+    seed(repository, "x", 100, consumer_id="alice", order_id="o-1")
+    seed(repository, "y", 200, consumer_id="alice", order_id="o-2")
+    seed(repository, "z", 300, consumer_id="bob", order_id="o-1")
+    assert jtis(client.get("/v1/contracts", params={"consumer_id": "alice"})) == [
+        "y",
+        "x",
+    ]
+    assert jtis(
+        client.get("/v1/contracts", params={"consumer_id": "alice", "order_id": "o-1"})
+    ) == ["x"]
+
+
+def test_expired_includes_the_boundary_second(client, repository) -> None:
+    """RFC 7519: a token must not be accepted on or after exp. So a contract
+    whose exp is exactly now is expired, not about to be."""
+    seed(repository, "past", 100, exp=FROZEN_NOW - 1)
+    seed(repository, "boundary", 200, exp=FROZEN_NOW)
+    seed(repository, "future", 300, exp=FROZEN_NOW + 1)
+    assert jtis(client.get("/v1/contracts", params={"expired": "true"})) == [
+        "boundary",
+        "past",
+    ]
+    assert jtis(client.get("/v1/contracts", params={"expired": "false"})) == ["future"]
+
+
+def test_expired_is_independent_of_status(client, repository) -> None:
+    """The case an admin screen most needs to get right: status says active,
+    but the permit is already dead."""
+    seed(repository, "zombie", 100, status="active", exp=FROZEN_NOW - 60)
+    seed(repository, "live", 200, status="active", exp=FROZEN_NOW + 60)
+    assert jtis(
+        client.get("/v1/contracts", params={"status": "active", "expired": "true"})
+    ) == ["zombie"]
+
+
+def b64(raw: str) -> str:
+    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+
+
+@pytest.mark.parametrize(
+    "cursor",
+    [
+        "!!!not-a-cursor!!!",
+        b64("not json"),
+        b64('{"r": 1, "j": "x"}'),  # an object, not a pair
+        b64("[1]"),  # wrong length
+        b64('[true, "x"]'),  # bool is an int in Python — must not pass
+        b64('["1", "x"]'),  # position as a string
+        b64('[1, ""]'),  # empty jti
+    ],
+)
+def test_a_damaged_cursor_is_400_not_500(client, cursor) -> None:
+    r = client.get("/v1/contracts", params={"cursor": cursor})
+    assert r.status_code == 400
+
+
+@pytest.mark.parametrize("limit", [0, 201])
+def test_limit_is_bounded(client, limit) -> None:
+    assert client.get("/v1/contracts", params={"limit": limit}).status_code == 422
+
+
+def test_list_rejects_an_unknown_status(client) -> None:
+    assert client.get("/v1/contracts", params={"status": "deleted"}).status_code == 422

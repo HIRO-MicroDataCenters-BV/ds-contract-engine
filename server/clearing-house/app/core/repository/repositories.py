@@ -23,9 +23,10 @@ event. A contract that exists with no record of being created would be worse
 than no contract at all.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 from app.core.models import AuditEvent, Contract
 from app.database import Database
@@ -33,6 +34,31 @@ from app.database import Database
 # Event types every implementation is expected to write.
 EVENT_REGISTERED = "contract.registered"
 EVENT_STATUS_CHANGED = "contract.status_changed"
+
+
+# A position in the contract list: (registered_at, jti) of the last row seen.
+#
+# Both halves are needed. Contracts are listed newest first, but registered_at
+# is whole seconds and the Generator can mint several in one — so it alone
+# cannot say where a page ended. jti breaks the tie. The pair is unique
+# because jti is.
+ContractPosition = Tuple[int, str]
+
+
+@dataclass(frozen=True)
+class ContractQuery:
+    """Which contracts to list. Every field is optional; unset means "any".
+
+    Expiry is expressed as bounds on exp rather than as "expired or not",
+    because deciding what expired means needs a clock, and a clock is a
+    business concern — see ContractUsecases.list_contracts.
+    """
+
+    status: Optional[str] = None
+    consumer_id: Optional[str] = None
+    order_id: Optional[str] = None
+    exp_at_or_before: Optional[int] = None
+    exp_after: Optional[int] = None
 
 
 class Repositories(ABC):
@@ -91,6 +117,24 @@ class Repositories(ABC):
 
         One order can span several contracts, so this is broader than
         events_for_jti.
+        """
+        ...
+
+    @abstractmethod
+    async def list_contracts(
+        self,
+        query: ContractQuery,
+        limit: int,
+        after: Optional[ContractPosition] = None,
+    ) -> List[Contract]:
+        """Contracts matching query, newest first, at most `limit` of them.
+
+        `after` continues from a previous call: only contracts strictly beyond
+        that position are returned. Positions are raw values — encoding them
+        into an opaque cursor is the API's business, not storage's.
+
+        Returns exactly what was asked for. Whether there is another page is
+        for the caller to find out, by asking for one more than it needs.
         """
         ...
 

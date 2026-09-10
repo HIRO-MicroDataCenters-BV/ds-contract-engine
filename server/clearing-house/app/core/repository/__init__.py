@@ -9,6 +9,8 @@ SqlRepository is the implementation used in every environment today.
 from app.core.repository.repositories import (
     EVENT_REGISTERED,
     EVENT_STATUS_CHANGED,
+    ContractPosition,
+    ContractQuery,
     Repositories,
 )
 from app.core.repository.sql_repository import SqlRepository
@@ -16,6 +18,8 @@ from app.core.repository.sql_repository import SqlRepository
 __all__ = [
     "EVENT_REGISTERED",
     "EVENT_STATUS_CHANGED",
+    "ContractPosition",
+    "ContractQuery",
     "Repositories",
     "SqlRepository",
 ]

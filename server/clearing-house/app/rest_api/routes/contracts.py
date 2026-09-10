@@ -5,14 +5,15 @@ against the stub this service replaces. Their status codes are not local
 design decisions — see clearing-house-stub and the adapters in
 contract-generator and contract-validator.
 
-The history endpoint is ours, added for the admin console. It is scoped to a
-single contract, so it lives here; the global ledger feed gets its own module.
+The list and history endpoints are ours, added for the admin console. Both are about
+contracts, so they live here; the global ledger feed gets its own module.
 """
 
 import logging
+from typing import Literal, Optional
 
 from classy_fastapi import Routable, get, patch, post
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query, status
 
 from app.core.exceptions import IllegalStatusTransition
 from app.core.repository import Repositories
@@ -21,10 +22,12 @@ from app.rest_api.depends import get_repository
 from app.rest_api.api_models import (
     AuditEventPage,
     AuditEventRecord,
+    ContractPage,
     ContractRecord,
     RegisterContractRequest,
     UpdateStatusRequest,
 )
+from app.rest_api.pagination import InvalidCursor, decode_cursor, encode_cursor
 from app.rest_api.tags import CONTRACTS, LEDGER
 
 logger = logging.getLogger(__name__)
@@ -69,6 +72,71 @@ class ContractsRoutes(Routable):
             exp=body.exp,
         )
         return ContractRecord.model_validate(contract)
+
+    @get(
+        "/v1/contracts",
+        operation_id="list_contracts",
+        summary="List contracts, newest first",
+        response_model=ContractPage,
+        tags=[CONTRACTS],
+    )
+    async def list_contracts(
+        self,
+        status_filter: Optional[
+            Literal["active", "completed", "cancelled", "revoked"]
+        ] = Query(None, alias="status"),
+        consumer_id: Optional[str] = Query(None, min_length=1),
+        order_id: Optional[str] = Query(None, min_length=1),
+        expired: Optional[bool] = Query(
+            None,
+            description=(
+                "true: exp has passed. false: exp is still ahead. Independent "
+                "of status — a contract can be active and expired."
+            ),
+        ),
+        limit: int = Query(50, ge=1, le=200),
+        cursor: Optional[str] = Query(
+            None, description="next_cursor from the previous page. Opaque."
+        ),
+        usecases: ContractUsecases = Depends(get_usecase),
+    ) -> ContractPage:
+        """For the admin console. The Generator and Validator never call this.
+
+        Cursor-paged, not offset-paged. New contracts arrive while someone is
+        paging, and with offsets each arrival shifts every row down one — so
+        page two repeats the end of page one. A cursor names a row, not a
+        count, so arrivals cannot move it.
+
+        `status` is exposed under that name but bound to `status_filter`,
+        because `status` is already the imported module of HTTP codes that
+        the error below depends on.
+        """
+        try:
+            after = decode_cursor(cursor) if cursor is not None else None
+        except InvalidCursor as e:
+            # 400, not 500: a damaged cursor is the caller's input, and letting
+            # it reach the query would surface as a type error.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            )
+
+        listing = await usecases.list_contracts(
+            limit=limit,
+            status=status_filter,
+            consumer_id=consumer_id,
+            order_id=order_id,
+            expired=expired,
+            after=after,
+        )
+        return ContractPage(
+            items=[ContractRecord.model_validate(c) for c in listing.items],
+            next_cursor=(
+                encode_cursor(listing.next_position)
+                if listing.next_position is not None
+                else None
+            ),
+        )
 
     @get(
         "/v1/contracts/{jti}",

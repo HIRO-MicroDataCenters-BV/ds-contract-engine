@@ -73,6 +73,20 @@ class ContractRecord(BaseModel):
     status_changed_at: int
 
 
+class ContractPage(BaseModel):
+    """One page of contracts.
+
+    An object, never a bare array — see AuditEventPage for why that is
+    load-bearing for the Validator.
+
+    next_cursor is null on the last page. Pass it back as ?cursor= to get the
+    next one; treat it as opaque, because its contents will change.
+    """
+
+    items: List[ContractRecord]
+    next_cursor: Optional[str] = None
+
+
 class AuditEventRecord(BaseModel):
     """One entry from the history log.
 

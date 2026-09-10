@@ -9,7 +9,7 @@ from typing import List, Optional
 
 import logging
 
-from sqlalchemy import select, text
+from sqlalchemy import and_, or_, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -17,6 +17,8 @@ from app.core.models import AuditEvent, Contract
 from app.core.repository.repositories import (
     EVENT_REGISTERED,
     EVENT_STATUS_CHANGED,
+    ContractPosition,
+    ContractQuery,
     Repositories,
 )
 from app.database import Database
@@ -143,6 +145,58 @@ class SqlRepository(Repositories):
                 return list(result.scalars().all())
         except SQLAlchemyError as e:
             logger.error("Database error reading events for %s: %s", described, e)
+            raise
+
+    async def list_contracts(
+        self,
+        query: ContractQuery,
+        limit: int,
+        after: Optional[ContractPosition] = None,
+    ) -> List[Contract]:
+        stmt = select(Contract)
+
+        if query.status is not None:
+            stmt = stmt.where(Contract.status == query.status)
+        if query.consumer_id is not None:
+            stmt = stmt.where(Contract.consumer_id == query.consumer_id)
+        if query.order_id is not None:
+            stmt = stmt.where(Contract.order_id == query.order_id)
+        if query.exp_at_or_before is not None:
+            stmt = stmt.where(Contract.exp <= query.exp_at_or_before)
+        if query.exp_after is not None:
+            stmt = stmt.where(Contract.exp > query.exp_after)
+
+        if after is not None:
+            registered_at, jti = after
+            # "Strictly beyond `after`" in (registered_at DESC, jti DESC) order.
+            #
+            # Spelled out as OR/AND rather than a row-value comparison
+            # (registered_at, jti) < (x, y). Both engines support row values,
+            # but this form depends on no version of either, and it is the
+            # line most likely to hide an off-by-one — so it is written to be
+            # read, not to be short.
+            stmt = stmt.where(
+                or_(
+                    Contract.registered_at < registered_at,
+                    and_(
+                        Contract.registered_at == registered_at,
+                        Contract.jti < jti,
+                    ),
+                )
+            )
+
+        # jti as the tiebreaker is what makes the order total. Without it, two
+        # contracts registered in the same second have no defined order, and
+        # a page boundary falling between them could show one twice or never.
+        stmt = stmt.order_by(Contract.registered_at.desc(), Contract.jti.desc())
+        stmt = stmt.limit(limit)
+
+        try:
+            async with self.database.session() as session:
+                result = await session.execute(stmt)
+                return list(result.scalars().all())
+        except SQLAlchemyError as e:
+            logger.error("Database error listing contracts: %s", e)
             raise
 
     async def health_check(self) -> bool:
