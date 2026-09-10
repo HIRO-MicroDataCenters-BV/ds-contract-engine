@@ -48,6 +48,9 @@ class LedgerRoutes(Routable):
         jti: Optional[str] = Query(None, min_length=1),
         order_id: Optional[str] = Query(None, min_length=1),
         consumer_id: Optional[str] = Query(None, min_length=1),
+        actor: Optional[str] = Query(
+            None, min_length=1, description="e.g. dev-allowlist:admin@example.org"
+        ),
         from_status: Optional[Status] = Query(None),
         to_status: Optional[Status] = Query(None),
         since: Optional[int] = Query(
@@ -89,6 +92,7 @@ class LedgerRoutes(Routable):
             jti=jti,
             order_id=order_id,
             consumer_id=consumer_id,
+            actor=actor,
             from_status=from_status,
             to_status=to_status,
             occurred_at_or_after=since,

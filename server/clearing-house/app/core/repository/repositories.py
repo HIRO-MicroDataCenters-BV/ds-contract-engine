@@ -65,6 +65,7 @@ class EventQuery:
     jti: Optional[str] = None
     order_id: Optional[str] = None
     consumer_id: Optional[str] = None
+    actor: Optional[str] = None
     from_status: Optional[str] = None
     to_status: Optional[str] = None
     occurred_at_or_after: Optional[int] = None
@@ -96,12 +97,21 @@ class Repositories(ABC):
 
     @abstractmethod
     async def set_status(
-        self, jti: str, status: str, changed_at: int
+        self,
+        jti: str,
+        status: str,
+        changed_at: int,
+        actor: Optional[str] = None,
+        reason: Optional[str] = None,
     ) -> Optional[Contract]:
         """Move a contract to a new status, and record that it happened.
 
         Returns the updated contract, or None if the jti is unknown. Performs
         no validation of the transition — see the module docstring.
+
+        actor and reason go on the history entry this writes, not on the
+        contract: the contract holds current state, the history holds who
+        changed it and why.
         """
         ...
 

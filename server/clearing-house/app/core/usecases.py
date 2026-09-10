@@ -102,11 +102,21 @@ class ContractUsecases:
         """
         return await self.repository.get(jti)
 
-    async def change_status(self, jti: str, new_status: str) -> Optional[Contract]:
+    async def change_status(
+        self,
+        jti: str,
+        new_status: str,
+        actor: Optional[str] = None,
+        reason: Optional[str] = None,
+    ) -> Optional[Contract]:
         """Move a contract to a new status, if the state machine allows it.
 
         Returns None if the jti is unknown. Raises IllegalStatusTransition if
         the change is forbidden — and records the attempt before raising.
+
+        actor and reason are recorded either way. A refused attempt is where
+        they matter most: "someone tried three times to reactivate this" is a
+        worry, "this person did" is something an operator can act on.
         """
         contract = await self.repository.get(jti)
         if contract is None:
@@ -114,15 +124,18 @@ class ContractUsecases:
 
         if not can_transition(contract.status, new_status):
             logger.warning(
-                "Refused status change on %s: %s -> %s",
+                "Refused status change on %s: %s -> %s actor=%s",
                 jti,
                 contract.status,
                 new_status,
+                actor,
             )
-            await self._record_rejection(contract, new_status)
+            await self._record_rejection(contract, new_status, actor, reason)
             raise IllegalStatusTransition(jti, contract.status, new_status)
 
-        return await self.repository.set_status(jti, new_status, self.clock())
+        return await self.repository.set_status(
+            jti, new_status, self.clock(), actor=actor, reason=reason
+        )
 
     async def history(self, jti: str) -> Optional[List[AuditEvent]]:
         """Everything that happened to one contract, oldest first.
@@ -189,6 +202,7 @@ class ContractUsecases:
         jti: Optional[str] = None,
         order_id: Optional[str] = None,
         consumer_id: Optional[str] = None,
+        actor: Optional[str] = None,
         from_status: Optional[str] = None,
         to_status: Optional[str] = None,
         occurred_at_or_after: Optional[int] = None,
@@ -200,6 +214,7 @@ class ContractUsecases:
             jti=jti,
             order_id=order_id,
             consumer_id=consumer_id,
+            actor=actor,
             from_status=from_status,
             to_status=to_status,
             occurred_at_or_after=occurred_at_or_after,
@@ -217,7 +232,13 @@ class ContractUsecases:
         """
         return await self.repository.events_for_order(order_id)
 
-    async def _record_rejection(self, contract: Contract, requested: str) -> None:
+    async def _record_rejection(
+        self,
+        contract: Contract,
+        requested: str,
+        actor: Optional[str],
+        reason: Optional[str],
+    ) -> None:
         """Log the refused attempt, without letting it break the refusal.
 
         If the audit write fails we still want the caller to get their 409:
@@ -231,6 +252,8 @@ class ContractUsecases:
                     jti=contract.jti,
                     order_id=contract.order_id,
                     consumer_id=contract.consumer_id,
+                    actor=actor,
+                    reason=reason,
                     # The transition that was asked for and refused — recorded
                     # exactly like one that succeeded, so a query for "attempts
                     # to reach active" finds both.

@@ -10,9 +10,9 @@ against the stub this service replaces — see clearing-house-stub. Changing
 them is not a local decision.
 """
 
-from typing import List, Literal, Optional
+from typing import Annotated, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 
 class HealthCheck(BaseModel):
@@ -48,6 +48,28 @@ class UpdateStatusRequest(BaseModel):
     """
 
     status: Literal["active", "completed", "cancelled", "revoked"]
+
+    # Who is making the change. Optional only for compatibility: the stub
+    # this service replaces accepted {"status"} alone, and the e2e script and
+    # docs still revoke that way. The admin backend must always send it.
+    #
+    # "source:identity" with a lowercase source — dev-allowlist:... today,
+    # dex:... once real login lands. A bare "rahul" is refused: an actor
+    # without its source has lost the one part that says how far to trust it.
+    actor: Optional[str] = Field(
+        None,
+        max_length=255,
+        pattern=r"^[a-z0-9][a-z0-9-]*:\S+$",
+        examples=["dev-allowlist:admin@example.org"],
+    )
+
+    # Why, in the actor's words. Surrounding whitespace is trimmed, and a
+    # blank reason is refused rather than stored as one that says nothing.
+    reason: Optional[
+        Annotated[
+            str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)
+        ]
+    ] = None
 
 
 class ContractRecord(BaseModel):
@@ -108,6 +130,11 @@ class AuditEventRecord(BaseModel):
     jti: Optional[str] = None
     order_id: Optional[str] = None
     consumer_id: Optional[str] = None
+
+    # Who did it and why. consumer_id is who the contract is for; actor is
+    # who acted on it. actor is a claim the caller made, not a verified fact.
+    actor: Optional[str] = None
+    reason: Optional[str] = None
 
     # The transition, structured. `detail` says the same thing in prose; these
     # are what a query can filter on.

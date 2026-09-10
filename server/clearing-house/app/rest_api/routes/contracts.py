@@ -175,7 +175,9 @@ class ContractsRoutes(Routable):
         not a missing resource.
         """
         try:
-            contract = await usecases.change_status(jti, body.status)
+            contract = await usecases.change_status(
+                jti, body.status, actor=body.actor, reason=body.reason
+            )
         except IllegalStatusTransition as e:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,

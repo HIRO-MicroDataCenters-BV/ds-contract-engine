@@ -74,7 +74,12 @@ class FakeRepository(Repositories):
         return self.contracts.get(jti)
 
     async def set_status(
-        self, jti: str, status: str, changed_at: int
+        self,
+        jti: str,
+        status: str,
+        changed_at: int,
+        actor: Optional[str] = None,
+        reason: Optional[str] = None,
     ) -> Optional[Contract]:
         contract = self.contracts.get(jti)
         if contract is None:
@@ -88,6 +93,8 @@ class FakeRepository(Repositories):
                 jti=jti,
                 order_id=contract.order_id,
                 consumer_id=contract.consumer_id,
+                actor=actor,
+                reason=reason,
                 from_status=previous,
                 to_status=status,
                 occurred_at=changed_at,
@@ -144,6 +151,7 @@ class FakeRepository(Repositories):
             "jti",
             "order_id",
             "consumer_id",
+            "actor",
             "from_status",
             "to_status",
         ):
@@ -805,3 +813,148 @@ def test_history_is_not_paged(client) -> None:
     response — and must not carry paging fields it never fills in."""
     client.post("/v1/contracts", json=register_body())
     assert set(client.get("/v1/contracts/abc-111/history").json()) == {"items"}
+
+
+# --- who and why: actor and reason ---------------------------------------
+
+ADMIN = "dev-allowlist:admin@example.org"
+
+
+def history_of(client, jti: str = "abc-111") -> List[dict]:
+    return client.get(f"/v1/contracts/{jti}/history").json()["items"]
+
+
+def revoke(client, jti: str = "abc-111", **extra):
+    return client.patch(
+        f"/v1/contracts/{jti}/status", json=dict({"status": "revoked"}, **extra)
+    )
+
+
+def test_a_revocation_records_who_and_why(client) -> None:
+    client.post("/v1/contracts", json=register_body())
+    revoke(client, actor=ADMIN, reason="credentials leaked")
+    event = history_of(client)[-1]
+    assert (event["event_type"], event["actor"], event["reason"]) == (
+        "contract.status_changed",
+        ADMIN,
+        "credentials leaked",
+    )
+
+
+def test_the_actor_is_not_the_consumer(client) -> None:
+    """The confusion this column exists to end. consumer_id is who the
+    contract is FOR; actor is who acted on it."""
+    client.post("/v1/contracts", json=register_body(consumer_id="dr-rahul"))
+    revoke(client, actor=ADMIN)
+    event = history_of(client)[-1]
+    assert (event["consumer_id"], event["actor"]) == ("dr-rahul", ADMIN)
+
+
+def test_a_refused_attempt_records_who_tried(client) -> None:
+    """Where actor matters most: not "someone tried to reactivate this", but
+    who."""
+    client.post("/v1/contracts", json=register_body())
+    revoke(client, actor=ADMIN)
+    r = client.patch(
+        "/v1/contracts/abc-111/status",
+        json={
+            "status": "active",
+            "actor": "dev-allowlist:intern@example.org",
+            "reason": "customer asked",
+        },
+    )
+    assert r.status_code == 409
+    event = history_of(client)[-1]
+    assert event["event_type"] == "contract.status_change_rejected"
+    assert (event["actor"], event["reason"]) == (
+        "dev-allowlist:intern@example.org",
+        "customer asked",
+    )
+
+
+def test_actor_stays_optional_for_the_stubs_callers(client) -> None:
+    """The e2e script and the docs revoke with {"status"} alone, as the stub
+    this service replaces allowed."""
+    client.post("/v1/contracts", json=register_body())
+    assert revoke(client).status_code == 200
+    event = history_of(client)[-1]
+    assert (event["actor"], event["reason"]) == (None, None)
+
+
+def test_a_registration_has_no_actor(client) -> None:
+    """The Generator does not say who it is, and an invented attribution would
+    be worse than none."""
+    client.post("/v1/contracts", json=register_body())
+    assert history_of(client)[0]["actor"] is None
+
+
+@pytest.mark.parametrize(
+    "actor",
+    [
+        ADMIN,
+        "dex:jane.doe@example.org",
+        "service-account:ops-bot",
+        "dex:colons:are:fine:after:the:source",
+        "dex:" + "x" * 251,  # 255 characters: exactly the column's width
+    ],
+)
+def test_well_formed_actors_are_accepted(client, actor) -> None:
+    client.post("/v1/contracts", json=register_body())
+    assert revoke(client, actor=actor).status_code == 200
+    assert history_of(client)[-1]["actor"] == actor
+
+
+@pytest.mark.parametrize(
+    "actor",
+    [
+        "rahul",  # no source: says nothing about how far to trust it
+        "dex:",  # no identity
+        ":rahul",  # empty source
+        "Dex:rahul",  # source must be lowercase, so "dex" and "Dex" never split
+        "-dex:rahul",  # source cannot start with a hyphen
+        "dex:rahul smith",  # whitespace in the identity
+        " dex:rahul",  # leading whitespace
+        "dex:" + "x" * 252,  # 256 characters: one over the column
+    ],
+)
+def test_malformed_actors_are_refused_and_leave_no_trace(client, actor) -> None:
+    """A 422 is refused before the state machine sees it, so unlike a 409 it
+    writes no history: malformed input is not an attempt to change anything."""
+    client.post("/v1/contracts", json=register_body())
+    before = len(history_of(client))
+    assert revoke(client, actor=actor).status_code == 422
+    assert len(history_of(client)) == before
+    assert client.get("/v1/contracts/abc-111").json()["status"] == "active"
+
+
+def test_a_reason_is_trimmed(client) -> None:
+    client.post("/v1/contracts", json=register_body())
+    revoke(client, actor=ADMIN, reason="   credentials leaked \n ")
+    assert history_of(client)[-1]["reason"] == "credentials leaked"
+
+
+def test_a_reason_may_use_its_full_width(client) -> None:
+    client.post("/v1/contracts", json=register_body())
+    assert revoke(client, actor=ADMIN, reason="x" * 500).status_code == 200
+
+
+@pytest.mark.parametrize("reason", ["", "   ", "x" * 501])
+def test_a_blank_or_oversized_reason_is_refused(client, reason) -> None:
+    """Blank would store a reason that says nothing; 501 is one over the
+    column."""
+    client.post("/v1/contracts", json=register_body())
+    assert revoke(client, actor=ADMIN, reason=reason).status_code == 422
+
+
+def test_the_feed_filters_by_actor(client) -> None:
+    """ "Show me everything this admin did" is one query."""
+    client.post("/v1/contracts", json=register_body("a"))
+    client.post("/v1/contracts", json=register_body("b"))
+    revoke(client, "a", actor=ADMIN, reason="leak")
+    revoke(client, "b", actor="dev-allowlist:other@example.org")
+
+    body = feed(client, actor=ADMIN).json()
+    assert body["total"] == 1
+    assert [(e["jti"], e["actor"], e["reason"]) for e in body["items"]] == [
+        ("a", ADMIN, "leak")
+    ]

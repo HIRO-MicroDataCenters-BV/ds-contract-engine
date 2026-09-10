@@ -1,6 +1,6 @@
 """The contract registry: one row per issued contract."""
 
-from sqlalchemy import BigInteger, String
+from sqlalchemy import BigInteger, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.models.base import Base
@@ -32,9 +32,15 @@ class Contract(Base):
     """
 
     __tablename__ = "contract"
+    __table_args__ = (
+        # The admin list's default order: newest first, jti breaking ties. An
+        # index in the same shape lets the database read rows already in order
+        # instead of sorting the whole table for every page.
+        Index("ix_contract_registered_at_jti", "registered_at", "jti"),
+    )
 
     # The permit id, from the token's `jti` claim. Primary key because it is
-    # the only thing this table is ever looked up by.
+    # what the hot path looks contracts up by — the Validator, on every read.
     jti: Mapped[str] = mapped_column(String(64), primary_key=True)
 
     # The basket this permit belongs to. One order can produce several
@@ -46,11 +52,12 @@ class Contract(Base):
     consumer_id: Mapped[str] = mapped_column(String(255))
 
     # One of ALL_STATUSES above.
-    status: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16), index=True)
 
     # Issued-at and expiry, copied from the token. Unix seconds.
     iat: Mapped[int] = mapped_column(BigInteger)
-    exp: Mapped[int] = mapped_column(BigInteger)
+    # Indexed for the admin list's expired / not-expired filter.
+    exp: Mapped[int] = mapped_column(BigInteger, index=True)
 
     # When *we* recorded it. Differs from iat if registration was delayed,
     # which is worth being able to see.

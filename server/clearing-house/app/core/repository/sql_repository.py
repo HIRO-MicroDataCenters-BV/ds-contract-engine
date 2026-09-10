@@ -70,7 +70,12 @@ class SqlRepository(Repositories):
             raise
 
     async def set_status(
-        self, jti: str, status: str, changed_at: int
+        self,
+        jti: str,
+        status: str,
+        changed_at: int,
+        actor: Optional[str] = None,
+        reason: Optional[str] = None,
     ) -> Optional[Contract]:
         try:
             async with self.database.session() as session:
@@ -89,6 +94,8 @@ class SqlRepository(Repositories):
                         jti=jti,
                         order_id=contract.order_id,
                         consumer_id=contract.consumer_id,
+                        actor=actor,
+                        reason=reason,
                         from_status=previous,
                         to_status=status,
                         occurred_at=changed_at,
@@ -96,7 +103,9 @@ class SqlRepository(Repositories):
                     )
                 )
                 await session.commit()
-                logger.info("Contract %s status %s -> %s", jti, previous, status)
+                logger.info(
+                    "Contract %s status %s -> %s actor=%s", jti, previous, status, actor
+                )
                 return contract
         except SQLAlchemyError as e:
             logger.error("Database error setting status on %s: %s", jti, e)
@@ -216,6 +225,8 @@ class SqlRepository(Repositories):
             conditions.append(AuditEvent.order_id == query.order_id)
         if query.consumer_id is not None:
             conditions.append(AuditEvent.consumer_id == query.consumer_id)
+        if query.actor is not None:
+            conditions.append(AuditEvent.actor == query.actor)
         if query.from_status is not None:
             conditions.append(AuditEvent.from_status == query.from_status)
         if query.to_status is not None:
