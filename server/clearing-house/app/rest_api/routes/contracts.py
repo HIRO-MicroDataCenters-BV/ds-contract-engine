@@ -76,7 +76,7 @@ class ContractsRoutes(Routable):
     @get(
         "/v1/contracts",
         operation_id="list_contracts",
-        summary="List contracts, newest first",
+        summary="List contracts, newest first unless sorted otherwise",
         response_model=ContractPage,
         tags=[CONTRACTS],
     )
@@ -94,6 +94,11 @@ class ContractsRoutes(Routable):
                 "of status — a contract can be active and expired."
             ),
         ),
+        sort: Literal["registered_at", "exp"] = Query(
+            "registered_at",
+            description="The column to order by. jti breaks ties.",
+        ),
+        direction: Literal["asc", "desc"] = Query("desc"),
         page: int = Query(1, ge=1, description="Pages count from 1."),
         limit: int = Query(50, ge=1, le=200),
         usecases: ContractUsecases = Depends(get_usecase),
@@ -107,6 +112,9 @@ class ContractsRoutes(Routable):
         `status` is the imported module of HTTP codes this file depends on,
         and shadowing it inside a handler is a trap for whoever next adds an
         error response here.
+
+        The sort direction is `direction`, not `order`: in this API an order
+        is a basket of contracts, and `order_id` already filters by one.
         """
         listing = await usecases.list_contracts(
             page=page,
@@ -115,6 +123,8 @@ class ContractsRoutes(Routable):
             consumer_id=consumer_id,
             order_id=order_id,
             expired=expired,
+            sort=sort,
+            descending=direction == "desc",
         )
         return ContractPage(
             items=[ContractRecord.model_validate(c) for c in listing.items],

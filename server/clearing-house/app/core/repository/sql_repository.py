@@ -17,13 +17,23 @@ from app.core.models import AuditEvent, Contract
 from app.core.repository.repositories import (
     EVENT_REGISTERED,
     EVENT_STATUS_CHANGED,
+    SORT_EXP,
+    SORT_REGISTERED_AT,
     ContractQuery,
+    ContractSort,
     EventQuery,
     Repositories,
 )
 from app.database import Database
 
 logger = logging.getLogger(__name__)
+
+# The sortable names mapped to their columns. A name missing here fails with
+# a KeyError rather than quietly falling back to some other order.
+_CONTRACT_SORT_COLUMNS = {
+    SORT_REGISTERED_AT: Contract.registered_at,
+    SORT_EXP: Contract.exp,
+}
 
 
 class SqlRepository(Repositories):
@@ -180,15 +190,25 @@ class SqlRepository(Repositories):
         return conditions
 
     async def list_contracts(
-        self, query: ContractQuery, limit: int, offset: int = 0
+        self,
+        query: ContractQuery,
+        limit: int,
+        offset: int = 0,
+        sort: ContractSort = ContractSort(),
     ) -> List[Contract]:
+        column = _CONTRACT_SORT_COLUMNS[sort.column]
+        # jti as the tiebreaker is what makes the order total. Without it,
+        # contracts sharing a second have no defined order, and offset paging
+        # can then show one twice or never. It runs in the same direction as
+        # the column, so ascending is exactly descending reversed.
+        if sort.descending:
+            order_by = (column.desc(), Contract.jti.desc())
+        else:
+            order_by = (column.asc(), Contract.jti.asc())
         stmt = (
             select(Contract)
             .where(*self._contract_conditions(query))
-            # jti as the tiebreaker is what makes the order total. Without it,
-            # contracts registered in the same second have no defined order,
-            # and offset paging can then show one twice or never.
-            .order_by(Contract.registered_at.desc(), Contract.jti.desc())
+            .order_by(*order_by)
             .limit(limit)
             .offset(offset)
         )

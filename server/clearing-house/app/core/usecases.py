@@ -18,7 +18,9 @@ import time
 from app.core.exceptions import IllegalStatusTransition
 from app.core.models import STATUS_ACTIVE, AuditEvent, Contract
 from app.core.repository import (
+    SORT_REGISTERED_AT,
     ContractQuery,
+    ContractSort,
     EventQuery,
     Repositories,
 )
@@ -160,8 +162,12 @@ class ContractUsecases:
         consumer_id: Optional[str] = None,
         order_id: Optional[str] = None,
         expired: Optional[bool] = None,
+        sort: str = SORT_REGISTERED_AT,
+        descending: bool = True,
     ) -> ContractListing:
-        """Contracts, newest first, one page at a time. Pages count from 1.
+        """Contracts, one page at a time. Pages count from 1.
+
+        Newest first unless `sort` and `descending` say otherwise.
 
         `expired` is deliberately separate from `status`. A contract can be
         `active` and already past its exp — the Validator checks the two
@@ -189,7 +195,12 @@ class ContractUsecases:
         # one ahead of the rows. Harmless for a screen a person is reading —
         # the same trade offset paging already makes when rows arrive between
         # page loads — and not worth a transaction to close.
-        items = await self.repository.list_contracts(query, limit, _offset(page, limit))
+        items = await self.repository.list_contracts(
+            query,
+            limit,
+            _offset(page, limit),
+            ContractSort(column=sort, descending=descending),
+        )
         total = await self.repository.count_contracts(query)
         return ContractListing(items, total)
 

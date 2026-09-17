@@ -25,6 +25,7 @@ from app.core.repository import (
     EVENT_REGISTERED,
     EVENT_STATUS_CHANGED,
     ContractQuery,
+    ContractSort,
     EventQuery,
     Repositories,
 )
@@ -134,11 +135,18 @@ class FakeRepository(Repositories):
         return rows
 
     async def list_contracts(
-        self, query: ContractQuery, limit: int, offset: int = 0
+        self,
+        query: ContractQuery,
+        limit: int,
+        offset: int = 0,
+        sort: ContractSort = ContractSort(),
     ) -> List[Contract]:
         rows = self._matching_contracts(query)
-        # Same total order as SqlRepository: (registered_at, jti), descending.
-        rows.sort(key=lambda c: (c.registered_at, c.jti), reverse=True)
+        # Same total order as SqlRepository: (column, jti), both in the
+        # sort's direction.
+        rows.sort(
+            key=lambda c: (getattr(c, sort.column), c.jti), reverse=sort.descending
+        )
         return rows[offset : offset + limit]
 
     async def count_contracts(self, query: ContractQuery) -> int:
@@ -514,6 +522,91 @@ def test_paging_visits_every_contract_exactly_once(client, repository) -> None:
     pages = walk(client, "/v1/contracts", limit=3)
     assert [len(p["items"]) for p in pages] == [3, 3, 1]
     assert [c["jti"] for c in every_item(pages)] == ["g", "f", "e", "d", "c", "b", "a"]
+
+
+def test_list_sorts_by_registered_oldest_first(client, repository) -> None:
+    seed(repository, "old", 100)
+    seed(repository, "new", 300)
+    seed(repository, "mid", 200)
+    assert jtis(contracts(client, sort="registered_at", direction="asc")) == [
+        "old",
+        "mid",
+        "new",
+    ]
+
+
+def test_list_sorts_by_expiry_in_either_direction(client, repository) -> None:
+    """Expiry order is independent of registration order — the seeds are
+    registered in the opposite order to the one they expire in."""
+    seed(repository, "late", 100, exp=FROZEN_NOW + 300)
+    seed(repository, "soon", 200, exp=FROZEN_NOW + 100)
+    seed(repository, "gone", 300, exp=FROZEN_NOW - 100)
+    assert jtis(contracts(client, sort="exp", direction="asc")) == [
+        "gone",
+        "soon",
+        "late",
+    ]
+    assert jtis(contracts(client, sort="exp", direction="desc")) == [
+        "late",
+        "soon",
+        "gone",
+    ]
+
+
+def test_sort_direction_defaults_to_descending(client, repository) -> None:
+    seed(repository, "soon", 100, exp=FROZEN_NOW + 100)
+    seed(repository, "late", 200, exp=FROZEN_NOW + 300)
+    assert jtis(contracts(client, sort="exp")) == ["late", "soon"]
+
+
+def test_ascending_is_exactly_descending_reversed(client, repository) -> None:
+    """jti breaks ties in the sort's own direction. Were it always
+    descending, contracts sharing an expiry would keep their relative order
+    when the column flips, and the list would not simply turn over."""
+    for jti, exp in [("a", 500), ("b", 500), ("c", 400), ("d", 500), ("e", 400)]:
+        seed(repository, jti, 100, exp=exp)
+    descending = jtis(contracts(client, sort="exp", direction="desc"))
+    ascending = jtis(contracts(client, sort="exp", direction="asc"))
+    assert descending == ["d", "b", "a", "e", "c"]
+    assert ascending == list(reversed(descending))
+
+
+@pytest.mark.parametrize("direction", ["asc", "desc"])
+def test_sorted_paging_visits_every_contract_exactly_once(
+    client, repository, direction
+) -> None:
+    """The paging guarantee holds for every sort, ties included."""
+    for jti, exp in [
+        ("a", 500),
+        ("b", 500),
+        ("c", 400),
+        ("d", 400),
+        ("e", 400),
+        ("f", 300),
+        ("g", 500),
+    ]:
+        seed(repository, jti, 100, exp=exp)
+
+    pages = walk(client, "/v1/contracts", limit=3, sort="exp", direction=direction)
+    seen = [c["jti"] for c in every_item(pages)]
+    assert sorted(seen) == ["a", "b", "c", "d", "e", "f", "g"]
+    assert seen == jtis(contracts(client, limit=50, sort="exp", direction=direction))
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"sort": "jti"},
+        {"sort": "status_changed_at"},
+        {"sort": ""},
+        {"direction": "up"},
+        {"direction": "DESC"},
+    ],
+)
+def test_list_rejects_an_unknown_sort(client, params) -> None:
+    """Refused rather than quietly ignored: an admin who asked for a sort
+    must not be shown the default order as if it were the one they chose."""
+    assert contracts(client, **params).status_code == 422
 
 
 def test_a_page_reports_where_it_is(client, repository) -> None:

@@ -52,6 +52,24 @@ class ContractQuery:
     exp_after: Optional[int] = None
 
 
+# Columns the contract list can be ordered by. Both are Unix seconds.
+SORT_REGISTERED_AT = "registered_at"
+SORT_EXP = "exp"
+CONTRACT_SORT_COLUMNS = (SORT_REGISTERED_AT, SORT_EXP)
+
+
+@dataclass(frozen=True)
+class ContractSort:
+    """The order to list contracts in. The default is newest first.
+
+    Kept apart from ContractQuery on purpose: that is the WHERE clause list
+    and count share, and a count has no order.
+    """
+
+    column: str = SORT_REGISTERED_AT
+    descending: bool = True
+
+
 @dataclass(frozen=True)
 class EventQuery:
     """Which history entries to list. Every field is optional; unset means "any".
@@ -142,16 +160,21 @@ class Repositories(ABC):
 
     @abstractmethod
     async def list_contracts(
-        self, query: ContractQuery, limit: int, offset: int = 0
+        self,
+        query: ContractQuery,
+        limit: int,
+        offset: int = 0,
+        sort: ContractSort = ContractSort(),
     ) -> List[Contract]:
-        """Contracts matching query, newest first: skip `offset`, return up
-        to `limit`.
+        """Contracts matching query, in `sort` order: skip `offset`, return
+        up to `limit`.
 
-        The order must be total — (registered_at, jti), both descending.
-        registered_at is whole seconds and the Generator mints several per
-        second, so on its own it leaves ties with no defined order, and with
-        offset paging an undefined order means a row can land on two pages or
-        on none, even when nothing new has arrived.
+        The order must be total — the sort column, then jti, both in the
+        sort's direction. Both sortable columns are whole seconds and the
+        Generator mints several contracts per second, so either one alone
+        leaves ties with no defined order, and with offset paging an
+        undefined order means a row can land on two pages or on none, even
+        when nothing new has arrived.
         """
         ...
 
