@@ -26,12 +26,50 @@ services:
       timeout: 3s
       retries: 10
 
+  # The real Clearing House. Runs alongside the stub during the build-out:
+  # the stub keeps serving the Generator and Validator on 8084 until the
+  # drop-in milestone (step 4), at which point they are repointed here.
+  ds-clearing-house:
+    build: ./server/clearing-house
+    image: ds-clearing-house:dev
+    container_name: ds-clearing-house
+    environment:
+      DS__NODE_ID: localhost
+      DS__LOG_LEVEL: INFO
+      DS__ENVIRONMENT: development
+      # Four slashes. Three would be a RELATIVE path, putting the database
+      # back inside the container where `docker compose down` destroys it —
+      # silently, while the mounted directory sat empty. Same trap as the
+      # Helm chart, same fix.
+      DS__DATABASE__URL: sqlite+aiosqlite:////data/clearing_house.db
+    volumes:
+      # A bind mount, not a named volume, and deliberately so: on macOS a
+      # named volume lives inside the Docker VM where no local GUI can reach
+      # it. This puts the file on the host, so a SQLite browser can open it
+      # directly — and the ledger survives `docker compose down`.
+      # Mirrors the /data mount the Helm chart gives the pod.
+      - ./.data/clearing-house:/data
+    # Apply migrations, then serve. The service deliberately does not create
+    # tables at startup, so something has to — in Kubernetes this becomes an
+    # initContainer. Alembic reads the same DS__DATABASE__URL, so both the
+    # migration and the app land on the mounted volume.
+    command: >-
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8085"
+    ports:
+      - "8085:8085"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8085/health-check/').status == 200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   ds-contract-generator:
     build: ./server/contract-generator
     image: ds-contract-generator:dev
     container_name: ds-contract-generator
     depends_on:
-      ds-clearing-house-stub:
+      ds-clearing-house:
         condition: service_healthy
     environment:
       # NODE_ID is set to `localhost` for the local-dev experience: any
@@ -43,7 +81,7 @@ services:
       DS__NODE_ID: localhost
       DS__SIGNING_KEY_PATH: /keys/ed25519.pem
       DS__SIGNING_KEY_ID: localhost#key-1
-      DS__CLEARING_HOUSE_URL: http://ds-clearing-house-stub:8084
+      DS__CLEARING_HOUSE_URL: http://ds-clearing-house:8085
       DS__DEFAULT_TTL_SECONDS: 3600
       DS__MAX_ITEMS_PER_CONTRACT: 50
       DS__ENVIRONMENT: production
@@ -67,13 +105,13 @@ services:
     depends_on:
       ds-contract-generator:
         condition: service_healthy
-      ds-clearing-house-stub:
+      ds-clearing-house:
         condition: service_healthy
     environment:
       # Must equal the Generator's NODE_ID so the audience check passes
       # (Generator stamps aud = its own NODE_ID).
       DS__NODE_ID: localhost
-      DS__CLEARING_HOUSE_URL: http://ds-clearing-house-stub:8084
+      DS__CLEARING_HOUSE_URL: http://ds-clearing-house:8085
       # JWKS still has to reach the Generator container, which lives at
       # its Docker DNS name on the compose network — the URL diverges
       # from NODE_ID here because there is no production-style TLS
@@ -86,6 +124,29 @@ services:
       DS__LOG_LEVEL: INFO
     ports:
       - "8083:8083"
+
+  # Browser UI for the Clearing House ledger — http://localhost:8086
+  #
+  # Starts with the rest of the stack. It waits for ds-clearing-house to be
+  # healthy first, because the migration that creates the tables runs at that
+  # service's startup — attaching earlier would open a database with no schema.
+  sqlite-web:
+    image: coleifer/sqlite-web:latest
+    container_name: ds-sqlite-web
+    # -r is READ-ONLY and is the point of this service, not a default to relax.
+    # The Clearing House is writing this file live, and hand-editing an audit
+    # ledger from a web page is exactly what the service exists to prevent.
+    # -x keeps it from prompting for a password on startup.
+    command: sqlite_web -H 0.0.0.0 -p 8080 -x /data/clearing_house.db -r
+    volumes:
+      # The same bind mount ds-clearing-house writes to, so this reads the
+      # live ledger rather than a copy that goes stale.
+      - ./.data/clearing-house:/data
+    ports:
+      - "8086:8080"
+    depends_on:
+      ds-clearing-house:
+        condition: service_healthy
 
 volumes:
   generator-keys:

@@ -44,7 +44,7 @@ contractValidator:
   # not match this value.
   nodeId: "localhost"
   # Per-node Clearing House URL for jti status lookup.
-  clearingHouseUrl: "http://ds-clearing-house:8080"
+  clearingHouseUrl: "http://ds-clearing-house:8085"
   # Optional JWKS base URL template. Empty means: derive from `iss` field
   # of the token by hitting https://<iss>/.well-known/jwks.json
   jwksBaseUrlTemplate: ""

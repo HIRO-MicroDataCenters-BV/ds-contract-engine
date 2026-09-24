@@ -1,0 +1,6 @@
+apiVersion: v2
+name: ds-clearing-house
+description: NextGen Data Space — Clearing House (contract registry and audit ledger)
+type: application
+version: "0.1.0"
+appVersion: "0.1.0"

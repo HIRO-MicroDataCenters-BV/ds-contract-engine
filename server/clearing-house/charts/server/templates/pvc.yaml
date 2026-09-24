@@ -1,0 +1,25 @@
+{{- if .Values.persistence.enabled }}
+# The SQLite database lives here.
+#
+# resource-policy: keep means `helm uninstall` leaves this behind. That is
+# deliberate: contract validation is fail-closed, so losing these records does
+# not merely lose audit history — it denies every outstanding token at this
+# node until they expire.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "app.fullname" . }}-data
+  annotations:
+    helm.sh/resource-policy: keep
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+  {{- if .Values.persistence.storageClass }}
+  storageClassName: {{ .Values.persistence.storageClass }}
+  {{- end }}
+{{- end }}

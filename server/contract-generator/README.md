@@ -52,7 +52,7 @@ docker build -t ds-contract-generator:dev .
 docker run -p 8082:8082 \
   -e DS__NODE_ID="hus.nextgen.hiro-develop.nl" \
   -e DS__SIGNING_KEY_ID="hus.nextgen.hiro-develop.nl#key-1" \
-  -e DS__CLEARING_HOUSE_URL="http://ds-clearing-house:8080" \
+  -e DS__CLEARING_HOUSE_URL="http://ds-clearing-house:8085" \
   -v $(pwd)/keys:/keys \
   -e DS__SIGNING_KEY_PATH="/keys/ed25519.pem" \
   ds-contract-generator:dev

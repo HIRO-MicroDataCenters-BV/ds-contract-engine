@@ -48,7 +48,7 @@ contractGenerator:
   # The kid published in the JWT header and the JWKS endpoint.
   signingKeyId: "localhost#key-1"
   # Per-node Clearing House URL for jti registration.
-  clearingHouseUrl: "http://ds-clearing-house:8080"
+  clearingHouseUrl: "http://ds-clearing-house:8085"
   # Default contract TTL when Checkout does not specify.
   defaultTtlSeconds: 3600
   # Maximum number of catalog items per contract.
