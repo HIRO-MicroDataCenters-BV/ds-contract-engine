@@ -15,8 +15,8 @@ set -uo pipefail
 
 GEN=${GEN:-http://localhost:8082}
 VAL=${VAL:-http://localhost:8083}
-CH=${CH:-http://localhost:8084}
-NODE_ID=${NODE_ID:-ds-contract-generator}
+CH=${CH:-http://localhost:8085}
+NODE_ID=${NODE_ID:-localhost}
 
 pass() { printf '✓ %s\n' "$1"; }
 fail() { printf '✗ %s\n   %s\n' "$1" "${2:-}" ; exit 1; }
@@ -35,8 +35,8 @@ RESP=$(curl -sS -X POST "$GEN/v1/contracts" \
       \"hash\": \"sha256:$(printf 'a%.0s' {1..64})\"
     }]
   }")
-TOKEN=$(echo "$RESP" | python -c 'import json,sys; print(json.load(sys.stdin).get("token",""))')
-JTI=$(echo "$RESP" | python -c 'import json,sys; print(json.load(sys.stdin).get("jti",""))')
+TOKEN=$(echo "$RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))')
+JTI=$(echo "$RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("jti",""))')
 if [ -z "$TOKEN" ] || [ -z "$JTI" ]; then
     fail "mint did not return a token" "$RESP"
 fi
@@ -46,8 +46,8 @@ echo "===== 2) Validate the freshly minted token ====="
 VRESP=$(curl -sS -X POST "$VAL/v1/validate" \
   -H "Content-Type: application/json" \
   -d "{\"token\": \"$TOKEN\"}")
-ALLOW=$(echo "$VRESP" | python -c 'import json,sys; print(json.load(sys.stdin).get("allow",""))')
-REASON=$(echo "$VRESP" | python -c 'import json,sys; print(json.load(sys.stdin).get("reason",""))')
+ALLOW=$(echo "$VRESP" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("allow",""))')
+REASON=$(echo "$VRESP" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("reason",""))')
 if [ "$ALLOW" != "True" ]; then
     fail "validation did not allow" "$VRESP"
 fi
@@ -71,7 +71,7 @@ if [ "$CODE" != "400" ]; then
 fi
 pass "cross-node mint refused (400)"
 
-echo "===== 4) Revoke contract via stub CH, then re-validate — expect deny ====="
+echo "===== 4) Revoke contract via CH, then re-validate — expect deny ====="
 PATCH_CODE=$(curl -sS -o /tmp/patch.json -w "%{http_code}" -X PATCH \
   "$CH/v1/contracts/${JTI}/status" \
   -H "Content-Type: application/json" \
@@ -82,8 +82,8 @@ fi
 VRESP2=$(curl -sS -X POST "$VAL/v1/validate" \
   -H "Content-Type: application/json" \
   -d "{\"token\": \"$TOKEN\"}")
-ALLOW2=$(echo "$VRESP2" | python -c 'import json,sys; print(json.load(sys.stdin).get("allow",""))')
-REASON2=$(echo "$VRESP2" | python -c 'import json,sys; print(json.load(sys.stdin).get("reason",""))')
+ALLOW2=$(echo "$VRESP2" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("allow",""))')
+REASON2=$(echo "$VRESP2" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("reason",""))')
 if [ "$ALLOW2" != "False" ]; then
     fail "revoked token still validated as allow=$ALLOW2" "$VRESP2"
 fi
@@ -93,7 +93,7 @@ echo "===== 5) Validate a malformed token — expect graceful deny ====="
 VRESP3=$(curl -sS -X POST "$VAL/v1/validate" \
   -H "Content-Type: application/json" \
   -d '{"token": "not.a.real.jwt"}')
-ALLOW3=$(echo "$VRESP3" | python -c 'import json,sys; print(json.load(sys.stdin).get("allow",""))')
+ALLOW3=$(echo "$VRESP3" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("allow",""))')
 if [ "$ALLOW3" != "False" ]; then
     fail "malformed token did not gracefully deny" "$VRESP3"
 fi

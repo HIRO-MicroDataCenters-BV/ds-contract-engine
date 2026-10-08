@@ -1,0 +1,111 @@
+# replicaCount is 1 by design, not by default.
+#
+# From step 2 onward this service owns a SQLite file on a ReadWriteOnce PVC.
+# SQLite is single-writer, so a second replica would either fail to mount the
+# volume or corrupt the ledger. The Deployment also uses strategy Recreate for
+# the same reason (added in step 9, with the PVC).
+replicaCount: 1
+
+image:
+  repository: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: ""
+nameOverride: ""
+fullnameOverride: "ds-clearing-house"
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+podSecurityContext: {}
+securityContext: {}
+
+container:
+  command: ["uvicorn"]
+  args: ["app.main:app", "--host", "0.0.0.0", "--port", "8085"]
+
+service:
+  type: ClusterIP
+  port: 8085
+
+# Probes deliberately hit the shallow health check, which does not touch
+# storage. With one replica there is nowhere to fail over to: a database blip
+# failing readiness would only turn a hiccup into mint failures, and a failing
+# liveness probe would restart the only pod holding the ledger.
+livenessProbe:
+  httpGet:
+    path: /health-check/
+    port: 8085
+
+readinessProbe:
+  httpGet:
+    path: /health-check/
+    port: 8085
+
+# --- Storage -------------------------------------------------------------
+persistence:
+  # Turning this off means the database lives in the container filesystem and
+  # is destroyed on every restart. Because validation is fail-closed, that
+  # denies every outstanding token at this node until it expires — so `false`
+  # is for throwaway environments only.
+  enabled: true
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+  storageClass: ""        # empty means the cluster default
+  mountPath: /data
+
+# --- Application configuration -----------------------------------------
+clearingHouse:
+  # This node's identity. Stamped onto every ledger entry, and never taken
+  # from a request body — a writer must not be able to attribute events to
+  # another node.
+  nodeId: "localhost"
+
+  # Four slashes, not three. sqlite+aiosqlite:///data/ch.db is a RELATIVE
+  # path — the database would land in the container's working directory and
+  # be lost on restart, silently, while the mounted volume sat empty.
+  databaseUrl: "sqlite+aiosqlite:////data/clearing_house.db"
+
+  # development | staging | production
+  environment: "production"
+  logLevel: "INFO"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# --- ServiceMonitor (Prometheus operator) -------------------------------
+# Disabled by default — flip to true once the infra team confirms the
+# prometheus-operator is installed and the ServiceMonitor CRD is available.
+# Rancher Monitoring selects on `release: rancher-monitoring`.
+serviceMonitor:
+  enabled: false
+  namespace: ""        # defaults to the release namespace
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}           # extra labels Prometheus uses to select monitors
+  metricRelabelings: []
+  relabelings: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+ingress:
+  # Default off, and it should stay off. The Clearing House is an internal
+  # service reached only by this node's Generator and Validator, and it has no
+  # authentication — exposing it would publish the registry to the internet.
+  # Host would be constructed as: ds-clearing-house.{namespace}.{host}
+  enabled: false
+  host: nextgen.hiro-develop.nl
