@@ -1,0 +1,173 @@
+"""HTTP request and response models.
+
+Named api_models, not models, to keep them distinct from app/core/models,
+which describes the database tables. The two are separate on purpose: They
+describe the same things but change for different reasons: adding an internal
+column should not silently reshape the public API.
+
+The request shapes are fixed by the two callers, which are already written
+against the stub this service replaces — see clearing-house-stub. Changing
+them is not a local decision.
+"""
+
+from typing import Annotated, List, Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+
+
+class HealthCheck(BaseModel):
+    status: str = "OK"
+
+
+class RegisterContractRequest(BaseModel):
+    """Body of POST /v1/contracts, as the Contract Generator sends it."""
+
+    # min_length guards against an empty id, which would create a row nothing
+    # could ever look up.
+    jti: str = Field(..., min_length=1)
+    order_id: str = Field(..., min_length=1)
+
+    # Accepted because the Generator sends it, then ignored: every contract
+    # starts active, and one arriving already revoked would be meaningless.
+    # Kept as Literal["active"] so anything else is a 422 rather than a
+    # silently discarded value.
+    status: Literal["active"] = "active"
+
+    consumer_id: str = Field(..., min_length=1)
+    iat: int
+    exp: int
+
+
+class UpdateStatusRequest(BaseModel):
+    """Body of PATCH /v1/contracts/{jti}/status.
+
+    All four statuses are accepted here. Whether a particular change is
+    permitted is the state machine's decision, not Pydantic's — so
+    revoked -> active passes validation and is then refused with 409, which
+    is the right distinction: the request is well formed, it conflicts.
+    """
+
+    status: Literal["active", "completed", "cancelled", "revoked"]
+
+    # Who is making the change. Optional only for compatibility: the stub
+    # this service replaces accepted {"status"} alone, and the e2e script and
+    # docs still revoke that way. The admin backend must always send it.
+    #
+    # "source:identity" with a lowercase source — dev-allowlist:... today,
+    # dex:... once real login lands. A bare "rahul" is refused: an actor
+    # without its source has lost the one part that says how far to trust it.
+    actor: Optional[str] = Field(
+        None,
+        max_length=255,
+        pattern=r"^[a-z0-9][a-z0-9-]*:\S+$",
+        examples=["dev-allowlist:admin@example.org"],
+    )
+
+    # Why, in the actor's words. Surrounding whitespace is trimmed, and a
+    # blank reason is refused rather than stored as one that says nothing.
+    reason: Optional[
+        Annotated[
+            str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)
+        ]
+    ] = None
+
+
+class ContractRecord(BaseModel):
+    """A contract, as returned to callers.
+
+    The stub returns the first six fields. The last two are additional: both
+    callers ignore fields they do not recognise, so this is a safe superset,
+    and status_changed_at answers "when was this revoked?" without a second
+    request.
+    """
+
+    # from_attributes lets model_validate() read straight off an ORM object,
+    # so routes do not hand-copy eight fields.
+    model_config = ConfigDict(from_attributes=True)
+
+    jti: str
+    order_id: str
+    status: str
+    consumer_id: str
+    iat: int
+    exp: int
+    registered_at: int
+    status_changed_at: int
+
+
+class ContractPage(BaseModel):
+    """One page of contracts.
+
+    An object, never a bare array — see AuditEventList for why that is
+    load-bearing for the Validator.
+
+    Asking for a page past the end returns an empty `items`, not an error:
+    total and total_pages still say how far the list actually goes.
+    """
+
+    items: List[ContractRecord]
+    page: int
+    limit: int
+    total: int
+    total_pages: int
+
+
+class AuditEventRecord(BaseModel):
+    """One entry from the history log.
+
+    Most fields are optional because not every event concerns a contract: a
+    future "peer.unreachable" has no permit, no order and no person, and
+    inventing values would be worse than leaving them null.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    # Position in the log. Two events can share occurred_at, so this is what
+    # gives a timeline an unambiguous order, and what the feed sorts by.
+    seq: int
+
+    event_type: str
+    jti: Optional[str] = None
+    order_id: Optional[str] = None
+    consumer_id: Optional[str] = None
+
+    # Who did it and why. consumer_id is who the contract is for; actor is
+    # who acted on it. actor is a claim the caller made, not a verified fact.
+    actor: Optional[str] = None
+    reason: Optional[str] = None
+
+    # The transition, structured. `detail` says the same thing in prose; these
+    # are what a query can filter on.
+    from_status: Optional[str] = None
+    to_status: Optional[str] = None
+
+    occurred_at: int
+    detail: Optional[str] = None
+
+
+class AuditEventList(BaseModel):
+    """Every history entry for one contract. Not paged.
+
+    An object wrapping a list, never a bare array, and that is load-bearing
+    rather than stylistic. The Validator's adapter calls `body.get("status")`
+    on whatever a contracts URL returns: on an object that yields None and it
+    denies gracefully, on a list it raises AttributeError and escapes its
+    fail-closed path as an HTTP 500. Every collection this service returns is
+    therefore an object.
+
+    Not paged because it is bounded — one registration plus a handful of
+    transitions. That changes if the planned `data.accessed` events start
+    landing per read, and when it does this becomes an AuditEventPage.
+    """
+
+    items: List[AuditEventRecord]
+
+
+class AuditEventPage(BaseModel):
+    """One page of the history log across every contract."""
+
+    items: List[AuditEventRecord]
+    page: int
+    limit: int
+    total: int
+    total_pages: int

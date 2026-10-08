@@ -11,7 +11,7 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-    - host: ds-clearing-house-stub.{{ .Values.namespace | default .Release.Namespace }}.{{ .Values.ingress.host }}
+    - host: ds-clearing-house.{{ .Values.namespace | default .Release.Namespace }}.{{ .Values.ingress.host }}
       http:
         paths:
           - path: /
@@ -23,6 +23,6 @@ spec:
                   number: {{ .Values.service.port }}
   tls:
     - hosts:
-        - ds-clearing-house-stub.{{ .Values.namespace | default .Release.Namespace }}.{{ .Values.ingress.host }}
+        - ds-clearing-house.{{ .Values.namespace | default .Release.Namespace }}.{{ .Values.ingress.host }}
       secretName: {{ include "app.fullname" . }}-tls-secret
 {{- end }}

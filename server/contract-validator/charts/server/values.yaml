@@ -44,7 +44,7 @@ contractValidator:
   # not match this value.
   nodeId: "localhost"
   # Per-node Clearing House URL for jti status lookup.
-  clearingHouseUrl: "http://ds-clearing-house:8080"
+  clearingHouseUrl: "http://ds-clearing-house:8085"
   # Optional JWKS base URL template. Empty means: derive from `iss` field
   # of the token by hitting https://<iss>/.well-known/jwks.json
   jwksBaseUrlTemplate: ""
@@ -83,18 +83,8 @@ tolerations: []
 affinity: {}
 
 ingress:
-  # Default off — opt-in per site via gitops values. Prevents an unintended
-  # Ingress on the default host when someone installs the chart raw.
+  # Default off — opt-in per site via gitops values.
+  # Host is constructed as: ds-contract-validator.{namespace}.{host}
+  # e.g. ds-contract-validator.hus.nextgen.hiro-develop.nl
   enabled: false
-  className: nginx
-  # cert-manager provisions a per-host cert when this annotation is present
-  # and tls.secretName is set. Same pattern used by ds-policy-engine, ds-catalog, etc.
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
-  host: ds-contract-validator.nextgen.hiro-develop.nl
-  path: /
-  pathType: Prefix
-  tls:
-    enabled: true
-    # cert-manager will create / refresh this Secret in the install namespace.
-    secretName: ds-contract-validator-tls-secret
+  host: nextgen.hiro-develop.nl

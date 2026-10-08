@@ -68,6 +68,22 @@ repos:
         language: system
         types: [python]
 
+  # clearing-house
+  - repo: local
+    hooks:
+      - id: mypy-clearing-house
+        name: mypy (clearing-house)
+        files: ^server/clearing-house/
+        entry: poetry --project server/clearing-house run mypy --config-file server/clearing-house/mypy.ini
+        language: system
+        types: [python]
+      - id: black-clearing-house
+        name: black (clearing-house)
+        files: ^server/clearing-house/
+        entry: poetry --project server/clearing-house run black
+        language: system
+        types: [python]
+
   # clearing-house-stub
   - repo: local
     hooks:
