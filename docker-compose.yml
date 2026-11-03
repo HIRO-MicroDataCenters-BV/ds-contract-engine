@@ -1,8 +1,8 @@
 # Local end-to-end stack for ds-contract-engine.
 #
-# Brings up all three services on a private Docker network so the Generator
-# can register tokens in the stub Clearing House and the Validator can fetch
-# the Generator's JWKS using in-cluster service names.
+# Brings up the services on a private Docker network so the Generator can
+# register tokens in the Clearing House and the Validator can fetch the
+# Generator's JWKS using in-cluster service names.
 #
 # Usage:
 #   docker compose up --build
@@ -26,12 +26,14 @@ services:
       timeout: 3s
       retries: 10
 
-  # The real Clearing House. Runs alongside the stub during the build-out:
-  # the stub keeps serving the Generator and Validator on 8084 until the
-  # drop-in milestone (step 4), at which point they are repointed here.
+  # The real Clearing House. Its code now lives in its own repository,
+  # HIRO-MicroDataCenters-BV/ds-clearing-house, so this pulls the published
+  # image instead of building it. Pin the same version as the HUS gitops
+  # bundle (hus-services/clearing-house/fleet.yaml). The image is amd64-only;
+  # on Apple silicon Docker runs it under emulation.
   ds-clearing-house:
-    build: ./server/clearing-house
-    image: ds-clearing-house:dev
+    image: ghcr.io/hiro-microdatacenters-bv/ds-clearing-house:0.1.0-dev.1.main.ad9145de
+    platform: linux/amd64
     container_name: ds-clearing-house
     environment:
       DS__NODE_ID: localhost

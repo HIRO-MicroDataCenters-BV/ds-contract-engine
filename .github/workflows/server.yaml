@@ -30,7 +30,6 @@ jobs:
         service:
           - contract-generator
           - contract-validator
-          - clearing-house
           - clearing-house-stub
     defaults:
       run:
