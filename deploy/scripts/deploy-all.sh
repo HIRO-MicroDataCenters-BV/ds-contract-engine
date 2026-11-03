@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Deploy the full Contract Engine stack (generator, validator, stub CH) into one
-# namespace using helm.
+# Deploy the full Contract Engine stack (Clearing House, generator, validator)
+# into one namespace using helm. The Clearing House comes from its own
+# repository's published chart (CH_CHART_VERSION, default below).
 #
 # Usage:
 #   ./deploy/scripts/deploy-all.sh <namespace> <node-short-name> <registry> <tag>
@@ -28,6 +29,11 @@ if [[ -z "$NAMESPACE" || -z "$NODE_SHORT" || -z "$REGISTRY" ]]; then
 fi
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+CH_CHART_VERSION="${CH_CHART_VERSION:-0.1.0-dev.1.main.ad9145de}"
+# Downloaded with curl and installed from the file: Helm 4 with --repo (or a
+# chart URL) also reads the cached index of every repo added on the machine,
+# and fails if one is missing.
+CH_CHART_URL="https://hiro-microdatacenters-bv.github.io/ds-clearing-house/helm-charts/ds-clearing-house-${CH_CHART_VERSION}.tgz"
 VALUES_DIR="${ROOT}/deploy/values"
 
 ch_values="${VALUES_DIR}/${NODE_SHORT}-clearing-house.yaml"
@@ -42,13 +48,12 @@ for f in "$ch_values" "$gen_values" "$val_values"; do
     fi
 done
 
-echo "--- Deploying ds-clearing-house-stub ---"
-helm upgrade --install ds-clearing-house-stub \
-    "${ROOT}/server/clearing-house-stub/charts/server" \
+echo "--- Deploying ds-clearing-house (chart ${CH_CHART_VERSION}) ---"
+ch_chart="$(mktemp -d)/ds-clearing-house.tgz"
+curl -fsSL -o "$ch_chart" "$CH_CHART_URL"
+helm upgrade --install ds-clearing-house "$ch_chart" \
     -n "$NAMESPACE" --create-namespace \
     -f "$ch_values" \
-    --set image.repository="${REGISTRY}/ds-clearing-house-stub" \
-    --set image.tag="$TAG" \
     --wait
 
 echo "--- Deploying ds-contract-generator ---"
@@ -71,4 +76,4 @@ helm upgrade --install ds-contract-validator \
 
 echo
 echo "All three services deployed in namespace $NAMESPACE."
-kubectl -n "$NAMESPACE" get pods -l 'app.kubernetes.io/name in (ds-contract-generator,ds-contract-validator,ds-clearing-house-stub)'
+kubectl -n "$NAMESPACE" get pods -l 'app.kubernetes.io/name in (ds-contract-generator,ds-contract-validator,ds-clearing-house)'
