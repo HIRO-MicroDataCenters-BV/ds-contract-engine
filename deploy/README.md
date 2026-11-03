@@ -8,11 +8,11 @@ Three services land in the cluster:
 
 | Service | Chart | Purpose |
 |---|---|---|
+| **ds-clearing-house** | published chart from [ds-clearing-house](https://github.com/HIRO-MicroDataCenters-BV/ds-clearing-house) | Contract registry with history (SQLite on a volume) |
 | **ds-contract-generator** | `server/contract-generator/charts/server` | Mints VC-JWT contracts |
 | **ds-contract-validator** | `server/contract-validator/charts/server` | Verifies contracts |
-| **ds-clearing-house-stub** | `server/clearing-house-stub/charts/server` | In-memory registry stand-in for the real Clearing House |
 
-The stub Clearing House is **for testing only** — it's removed and replaced when the real Clearing House service exists. Contract Engine code does not change at that point; only the URL it points at.
+The Clearing House has its own repository; `deploy-all.sh` downloads its published chart (`CH_CHART_VERSION`) and its image comes from ghcr, so it is not built here.
 
 ## What you need before deploying
 
@@ -33,11 +33,9 @@ export TAG=0.1.0
 
 docker build -t $REGISTRY/ds-contract-generator:$TAG ./server/contract-generator
 docker build -t $REGISTRY/ds-contract-validator:$TAG ./server/contract-validator
-docker build -t $REGISTRY/ds-clearing-house-stub:$TAG ./server/clearing-house-stub
 
 docker push $REGISTRY/ds-contract-generator:$TAG
 docker push $REGISTRY/ds-contract-validator:$TAG
-docker push $REGISTRY/ds-clearing-house-stub:$TAG
 
 # 2. Generate this node's Ed25519 signing key and create the Secret
 ./deploy/scripts/generate-signing-key.sh nextgen hus.nextgen.hiro-develop.nl
@@ -49,11 +47,11 @@ docker push $REGISTRY/ds-clearing-house-stub:$TAG
 That runs the equivalent of:
 
 ```bash
-helm upgrade --install ds-clearing-house-stub ./server/clearing-house-stub/charts/server \
+curl -fsSL -o ds-clearing-house.tgz \
+  https://hiro-microdatacenters-bv.github.io/ds-clearing-house/helm-charts/ds-clearing-house-0.1.0-dev.1.main.ad9145de.tgz
+helm upgrade --install ds-clearing-house ./ds-clearing-house.tgz \
   -n nextgen --create-namespace \
-  -f deploy/values/hus-clearing-house.yaml \
-  --set image.repository=$REGISTRY/ds-clearing-house-stub \
-  --set image.tag=$TAG
+  -f deploy/values/hus-clearing-house.yaml
 
 helm upgrade --install ds-contract-generator ./server/contract-generator/charts/server \
   -n nextgen \
@@ -73,7 +71,7 @@ helm upgrade --install ds-contract-validator ./server/contract-validator/charts/
 ```bash
 kubectl -n nextgen get pods
 # Expected:
-#   ds-clearing-house-stub-xxxx       1/1 Running
+#   ds-clearing-house-xxxx            1/1 Running
 #   ds-contract-generator-xxxx        1/1 Running
 #   ds-contract-validator-xxxx        1/1 Running
 
@@ -116,7 +114,7 @@ The [`values/`](values/) folder has example overrides for the HUS node. For othe
 |---|---|
 | [`values/hus-generator.yaml`](values/hus-generator.yaml) | Generator deployment on HUS |
 | [`values/hus-validator.yaml`](values/hus-validator.yaml) | Validator deployment on HUS |
-| [`values/hus-clearing-house.yaml`](values/hus-clearing-house.yaml) | Stub CH deployment on HUS |
+| [`values/hus-clearing-house.yaml`](values/hus-clearing-house.yaml) | Clearing House deployment on HUS |
 
 ## Multi-node testing
 
@@ -127,6 +125,8 @@ Both nodes' Generator services need a `Service` of `type: NodePort`, `type: Load
 ## Uninstalling
 
 ```bash
-helm -n nextgen uninstall ds-contract-validator ds-contract-generator ds-clearing-house-stub
+helm -n nextgen uninstall ds-contract-validator ds-contract-generator ds-clearing-house
+# The Clearing House's volume (its whole ledger) stays until you delete it:
+#   kubectl -n nextgen delete pvc ds-clearing-house-data
 kubectl -n nextgen delete secret ds-contract-generator-signing-key
 ```

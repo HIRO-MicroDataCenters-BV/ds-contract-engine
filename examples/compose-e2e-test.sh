@@ -8,7 +8,7 @@
 #   1) Mint a contract for a local item — expect 200
 #   2) Validate the freshly minted token — expect allow=true
 #   3) Mint a contract for a cross-node item — expect 400
-#   4) Revoke the contract via stub CH PATCH; re-validate — expect allow=false
+#   4) Revoke the contract via the Clearing House PATCH; re-validate — expect allow=false
 #   5) Validate a malformed token — expect allow=false (not 500)
 
 set -uo pipefail
@@ -75,7 +75,7 @@ echo "===== 4) Revoke contract via CH, then re-validate — expect deny ====="
 PATCH_CODE=$(curl -sS -o /tmp/patch.json -w "%{http_code}" -X PATCH \
   "$CH/v1/contracts/${JTI}/status" \
   -H "Content-Type: application/json" \
-  -d '{"status": "revoked"}')
+  -d '{"status": "revoked", "actor": "compose-e2e:test", "reason": "e2e revoke check"}')
 if [ "$PATCH_CODE" != "200" ]; then
     fail "expected 200 on status patch, got $PATCH_CODE" "$(cat /tmp/patch.json)"
 fi

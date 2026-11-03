@@ -11,22 +11,7 @@
 #   ./examples/end-to-end.sh          # uses localhost:8082, localhost:8083
 
 services:
-  ds-clearing-house-stub:
-    build: ./server/clearing-house-stub
-    image: ds-clearing-house-stub:dev
-    container_name: ds-clearing-house-stub
-    environment:
-      DS__LOG_LEVEL: INFO
-      DS__ENVIRONMENT: development
-    ports:
-      - "8084:8084"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8084/health-check/').status == 200 else 1)"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
-  # The real Clearing House. Its code now lives in its own repository,
+  # The Clearing House. Its code lives in its own repository,
   # HIRO-MicroDataCenters-BV/ds-clearing-house, so this pulls the published
   # image instead of building it. Pin the same version as the HUS gitops
   # bundle (hus-services/clearing-house/fleet.yaml). The image is amd64-only;

@@ -30,7 +30,6 @@ jobs:
         service:
           - contract-generator
           - contract-validator
-          - clearing-house-stub
     defaults:
       run:
         working-directory: ./server/${{ matrix.service }}
@@ -165,13 +164,3 @@ jobs:
           token: ${{ github.token }}
           charts_dir: "./server/contract-validator/charts/"
           target_dir: "./helm-charts/contract-validator/"
-
-      - name: Patch clearing-house-stub chart version
-        run: ./tools/version.sh "${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/ds-clearing-house-stub" "clearing-house-stub"
-
-      - name: Publish clearing-house-stub chart
-        uses: stefanprodan/helm-gh-pages@master
-        with:
-          token: ${{ github.token }}
-          charts_dir: "./server/clearing-house-stub/charts/"
-          target_dir: "./helm-charts/clearing-house-stub/"

@@ -1,11 +1,26 @@
-# Example values override for the stub Clearing House on the HUS node.
+# Example values override for the Clearing House on the HUS node.
 # Copy this file and rename per-node when deploying to others.
+#
+# The Clearing House lives in its own repository
+# (HIRO-MicroDataCenters-BV/ds-clearing-house); deploy-all.sh installs its
+# published chart. These match ds-gitops hus-services/clearing-house.
 
-replicaCount: 1
-
-clearingHouseStub:
-  environment: "production"   # disables any dev shortcuts in the stub
+clearingHouse:
+  # Stamped on every ledger entry; same value as the Generator's nodeId.
+  nodeId: "hus.nextgen.hiro-develop.nl"
+  environment: "production"
   logLevel: "INFO"
+
+# SQLite on a ReadWriteOnce volume (cluster default storage class). The chart
+# runs one replica with strategy Recreate, as SQLite needs. Back it up: it
+# holds every registered contract and its history.
+persistence:
+  enabled: true
+  size: 1Gi
+
+# No authentication yet, so it stays in-cluster here.
+ingress:
+  enabled: false
 
 # Flip on once the platform Prometheus operator is confirmed.
 serviceMonitor:
@@ -13,8 +28,8 @@ serviceMonitor:
 
 resources:
   requests:
-    cpu: 50m
-    memory: 64Mi
+    cpu: 100m
+    memory: 128Mi
   limits:
-    cpu: 200m
-    memory: 256Mi
+    cpu: 500m
+    memory: 512Mi
