@@ -68,22 +68,6 @@ repos:
         language: system
         types: [python]
 
-  # clearing-house-stub
-  - repo: local
-    hooks:
-      - id: mypy-stub
-        name: mypy (clearing-house-stub)
-        files: ^server/clearing-house-stub/
-        entry: poetry --project server/clearing-house-stub run mypy --config-file server/clearing-house-stub/mypy.ini
-        language: system
-        types: [python]
-      - id: black-stub
-        name: black (clearing-house-stub)
-        files: ^server/clearing-house-stub/
-        entry: poetry --project server/clearing-house-stub run black
-        language: system
-        types: [python]
-
   # --- OpenAPI specs ---------------------------------------------------
   # Regenerate the OpenAPI spec for each sub-service on commit so the
   # api/<svc>/openapi.yaml file stays in sync with the FastAPI app.
